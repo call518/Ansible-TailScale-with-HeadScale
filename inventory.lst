@@ -2,8 +2,13 @@
 tailscale-head ansible_host=192.168.156.100 host_alias=tailscale-head.local cert_dns_sans='["tailscale-head", "tailscale-head.local"]' cert_ip_sans='["192.168.156.100"]'
 
 [tailscale_routers]
-tailscale-01 ansible_host=192.168.156.101 host_alias=site-a-router site_nic=ens224 site_cidr=10.10.10.0/24 site_test_ip=10.10.10.201
-tailscale-02 ansible_host=192.168.156.102 host_alias=site-b-router site_nic=ens224 site_cidr=10.10.20.0/24 site_test_ip=10.10.20.202
+tailscale-01 ansible_host=192.168.156.101 host_alias=site-a-router site_nic=ens224 site_cidr=10.10.10.0/24
+tailscale-02 ansible_host=192.168.156.102 host_alias=site-b-router site_nic=ens224 site_cidr=10.10.20.0/24
+
+### 테스트하지 않을 경우 아래 그룹 전체를 주석 처리하거나 삭제
+#[site_test_endpoints]
+#tailscale-01 site_test_ip=10.10.10.201
+#tailscale-02 site_test_ip=10.10.20.202
 
 [tailscale:children]
 headscale

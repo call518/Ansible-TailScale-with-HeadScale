@@ -79,6 +79,10 @@ my-head.example.com ansible_host=192.168.156.100 host_alias=head cert_dns_sans='
 [tailscale_routers]
 site-a.example.com ansible_host=192.168.156.101 host_alias=site-a site_nic=ens224 site_cidr=10.10.10.0/24
 site-b.example.com ansible_host=192.168.156.102 host_alias=site-b site_nic=ens224 site_cidr=10.10.20.0/24
+
+[site_test_endpoints]
+site-a.example.com site_test_ip=10.10.10.201
+site-b.example.com site_test_ip=10.10.20.202
 ```
 
 NIC 주소 자체는 이미 구성된 상태를 전제로 하며 이 플레이북이 NetworkManager
@@ -204,13 +208,17 @@ Role 또는 단계별 단독 실행은 태그를 사용한다.
 ## 선택적 netns 가상 단말 검증
 
 실제 Site 단말 없이도 각 Router에 임시 Linux network namespace와 veth를 생성하여
-Site-to-Site 데이터 경로를 검증할 수 있다. 테스트 IP는 `inventory.lst`의
-`site_test_ip`에서 호스트별로 지정한다.
+Site-to-Site 데이터 경로를 검증할 수 있다. 검증할 Router만 선택적
+`[site_test_endpoints]` 그룹에 추가하고 `site_test_ip`를 호스트별로 지정한다.
 
 ```ini
-tailscale-01 ... site_test_ip=10.10.10.201
-tailscale-02 ... site_test_ip=10.10.20.202
+[site_test_endpoints]
+tailscale-01 site_test_ip=10.10.10.201
+tailscale-02 site_test_ip=10.10.20.202
 ```
+
+테스트가 필요 없거나 테스트 IP를 배정할 수 없는 환경에서는 그룹을 비워두거나
+제거하면 된다. `[tailscale_routers]`의 설치 및 운영에는 영향을 주지 않는다.
 
 전체 설치와 route 승인이 끝난 후 실행한다.
 

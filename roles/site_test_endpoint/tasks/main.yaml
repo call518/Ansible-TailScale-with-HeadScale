@@ -8,10 +8,10 @@
     that:
       - site_test_ip is defined
       - site_test_ip | length > 0
-      - groups['tailscale_routers'] | length > 1
+      - groups['site_test_endpoints'] | length > 1
     fail_msg: >-
-      Each router requires site_test_ip in inventory.lst and validation
-      requires at least two tailscale_routers.
+      Each site_test_endpoints host requires site_test_ip in inventory.lst
+      and validation requires at least two test endpoints.
 
 - name: Install temporary Site endpoint setup script
   ansible.builtin.template:
@@ -40,7 +40,7 @@
           - -W
           - "2"
           - "{{ hostvars[item].site_test_ip }}"
-      loop: "{{ groups['tailscale_routers'] | difference([inventory_hostname]) }}"
+      loop: "{{ groups['site_test_endpoints'] | difference([inventory_hostname]) }}"
       loop_control:
         label: "{{ inventory_hostname }} -> {{ item }} ({{ hostvars[item].site_test_ip }})"
       register: site_test_ping

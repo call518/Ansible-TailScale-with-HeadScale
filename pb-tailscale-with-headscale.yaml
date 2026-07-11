@@ -109,7 +109,7 @@
       until: route_approval.rc == 0
 
 - name: Validate Site-to-Site routing with temporary network namespaces
-  hosts: tailscale_routers
+  hosts: site_test_endpoints
   become: true
   gather_facts: false
   vars_files:
