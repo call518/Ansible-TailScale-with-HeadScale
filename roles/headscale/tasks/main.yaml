@@ -238,7 +238,37 @@
 - name: Validate Headscale configuration
   ansible.builtin.command:
     argv: ["{{ headscale_binary_path }}", configtest, --config, "{{ headscale_config_dir }}/config.yaml"]
+  become: true
+  become_user: "{{ headscale_user }}"
   changed_when: false
+
+- name: Reconcile Headscale state after configuration validation
+  ansible.builtin.file:
+    path: "{{ headscale_data_dir }}"
+    state: directory
+    owner: "{{ headscale_user }}"
+    group: "{{ headscale_group }}"
+    recurse: true
+
+- name: Find private keys created during configuration validation
+  ansible.builtin.find:
+    paths: "{{ headscale_data_dir }}"
+    patterns:
+      - noise_private.key
+      - derp_server_private.key
+    file_type: file
+    recurse: false
+  register: validated_headscale_private_keys
+
+- name: Protect private keys created during configuration validation
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ headscale_user }}"
+    group: "{{ headscale_group }}"
+    mode: "0600"
+  loop: "{{ validated_headscale_private_keys.files }}"
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Install Headscale systemd unit
   ansible.builtin.template:
