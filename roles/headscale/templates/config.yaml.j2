@@ -1,0 +1,79 @@
+---
+server_url: {{ headscale_url }}
+listen_addr: 0.0.0.0:{{ headscale_listen_port }}
+metrics_listen_addr: 127.0.0.1:9091
+grpc_listen_addr: 127.0.0.1:50443
+grpc_allow_insecure: false
+trusted_proxies: []
+noise:
+  private_key_path: {{ headscale_data_dir }}/noise_private.key
+prefixes:
+  v4: {{ headscale_tailnet_v4_prefix }}
+  v6: {{ headscale_tailnet_v6_prefix }}
+allocation: sequential
+derp:
+  server:
+    enabled: true
+    region_id: {{ headscale_derp_region_id }}
+    region_code: headscale
+    region_name: Headscale Embedded DERP
+    verify_clients: true
+    stun_listen_addr: "0.0.0.0:{{ headscale_stun_port }}"
+    private_key_path: {{ headscale_data_dir }}/derp_server_private.key
+    automatically_add_embedded_derp_region: true
+    ipv4: {{ headscale_ip }}
+    ipv6: ""
+  urls: []
+  paths: []
+  auto_update_enabled: false
+  update_frequency: 3h
+disable_check_updates: true
+node:
+  expiry: 0
+  ephemeral:
+    inactivity_timeout: 30m
+  routes:
+    ha:
+      probe_interval: 10s
+      probe_timeout: 5s
+database:
+  type: sqlite
+  debug: false
+  gorm:
+    prepare_stmt: true
+    parameterized_queries: true
+    skip_err_record_not_found: true
+    slow_threshold: 1000
+  sqlite:
+    path: {{ headscale_data_dir }}/db.sqlite
+    write_ahead_log: true
+    wal_autocheckpoint: 1000
+tls_letsencrypt_hostname: ""
+tls_letsencrypt_cache_dir: {{ headscale_data_dir }}/cache
+tls_letsencrypt_challenge_type: HTTP-01
+tls_letsencrypt_listen: ":http"
+tls_cert_path: {{ headscale_config_dir }}/tls/server.crt
+tls_key_path: {{ headscale_config_dir }}/tls/server.key
+log:
+  level: info
+  format: text
+policy:
+  mode: file
+  path: {{ headscale_config_dir }}/policy.hujson
+dns:
+  magic_dns: true
+  base_domain: {{ headscale_dns_domain }}
+  override_local_dns: false
+  nameservers:
+    global: []
+    split: {}
+  search_domains: []
+  extra_records: []
+unix_socket: {{ headscale_runtime_dir }}/headscale.sock
+unix_socket_permission: "0770"
+logtail:
+  enabled: false
+taildrop:
+  enabled: true
+auto_update:
+  enabled: false

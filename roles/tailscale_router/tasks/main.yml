@@ -1,0 +1,163 @@
+---
+- name: Load this router's site definition
+  ansible.builtin.set_fact:
+    site_nic: "{{ tailscale_router_sites[inventory_hostname].site_nic }}"
+    site_cidr: "{{ tailscale_router_sites[inventory_hostname].site_cidr }}"
+
+- name: Validate required router variables
+  ansible.builtin.assert:
+    that:
+      - site_nic is defined
+      - site_nic | length > 0
+      - site_cidr is defined
+      - site_cidr | length > 0
+      - inventory_hostname in tailscale_router_sites
+    fail_msg: "inventory.lst에서 각 라우터의 site_nic과 site_cidr를 지정해야 합니다."
+
+- name: Read internal CA from Headscale host
+  ansible.builtin.slurp:
+    src: "{{ headscale_pki_dir }}/headscale-root-ca.crt"
+  delegate_to: "{{ groups['headscale'][0] }}"
+  register: headscale_ca
+  no_log: true
+
+- name: Install internal CA in router trust store
+  ansible.builtin.copy:
+    content: "{{ headscale_ca.content | b64decode }}"
+    dest: /etc/pki/ca-trust/source/anchors/headscale-root-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  register: router_ca_trust
+
+- name: Update router trust store  # noqa no-handler
+  ansible.builtin.command: update-ca-trust
+  when: router_ca_trust.changed
+  notify: Restart tailscaled
+  changed_when: true
+
+- name: Install Tailscale repository definition
+  ansible.builtin.get_url:
+    url: "{{ tailscale_repo_url }}"
+    dest: "{{ tailscale_repo_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install Tailscale client
+  ansible.builtin.dnf:
+    name: "{{ tailscale_package }}"
+    state: present
+
+- name: Configure packet forwarding
+  ansible.builtin.template:
+    src: forwarding.conf.j2
+    dest: /etc/sysctl.d/99-tailscale-site-to-site.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply sysctl
+
+- name: Enable and start tailscaled
+  ansible.builtin.service:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Check router firewall configuration
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "firewall-cmd --permanent --zone=trusted --query-interface={{ site_nic }}"
+    - "firewall-cmd --permanent --query-port={{ tailscale_udp_port }}/udp"
+  when: common_manage_firewalld | bool
+  register: router_firewall_checks
+  changed_when: false
+  failed_when: false
+
+- name: Trust site-facing interface
+  ansible.builtin.command: "firewall-cmd --permanent --zone=trusted --add-interface={{ site_nic }}"
+  when:
+    - common_manage_firewalld | bool
+    - router_firewall_checks.results[0].rc != 0
+  notify: Reload firewalld
+  changed_when: true
+
+- name: Open Tailscale UDP port
+  ansible.builtin.command: "firewall-cmd --permanent --add-port={{ tailscale_udp_port }}/udp"
+  when:
+    - common_manage_firewalld | bool
+    - router_firewall_checks.results[1].rc != 0
+  notify: Reload firewalld
+  changed_when: true
+
+- name: Read current Tailscale state
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_state_command
+  changed_when: false
+  failed_when: false
+
+- name: Determine whether registration is required
+  ansible.builtin.set_fact:
+    tailscale_registration_required: >-
+      {{ tailscale_state_command.rc != 0 or
+         (tailscale_state_command.stdout | default('{}') | from_json).BackendState | default('') != 'Running' }}
+
+- name: Create one-time Headscale pre-auth key
+  ansible.builtin.command:
+    argv:
+      - "{{ headscale_binary_path }}"
+      - preauthkeys
+      - create
+      - --user
+      - "{{ headscale_namespace }}"
+  delegate_to: "{{ groups['headscale'][0] }}"
+  register: router_auth_key
+  when: tailscale_registration_required | bool
+  no_log: true
+  changed_when: true
+
+- name: Register router and apply subnet-router settings
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - up
+      - "--login-server={{ headscale_url }}"
+      - "--authkey={{ router_auth_key.stdout | trim }}"
+      - "--hostname={{ inventory_hostname }}"
+      - "--advertise-routes={{ site_cidr }}"
+      - "--accept-routes={{ tailscale_accept_routes | bool | lower }}"
+      - "--snat-subnet-routes={{ tailscale_snat_subnet_routes | bool | lower }}"
+      - "--accept-dns={{ tailscale_accept_dns | bool | lower }}"
+  when: tailscale_registration_required | bool
+  no_log: true
+  changed_when: true
+
+- name: Reconcile settings on an already registered router
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - up
+      - "--login-server={{ headscale_url }}"
+      - "--hostname={{ inventory_hostname }}"
+      - "--advertise-routes={{ site_cidr }}"
+      - "--accept-routes={{ tailscale_accept_routes | bool | lower }}"
+      - "--snat-subnet-routes={{ tailscale_snat_subnet_routes | bool | lower }}"
+      - "--accept-dns={{ tailscale_accept_dns | bool | lower }}"
+  when: not (tailscale_registration_required | bool)
+  register: tailscale_reconcile
+  changed_when: "'Success' in tailscale_reconcile.stdout"
+
+- name: Check tailscale0 trusted-zone membership
+  ansible.builtin.command: firewall-cmd --permanent --zone=trusted --query-interface=tailscale0
+  when: common_manage_firewalld | bool
+  register: tailscale_interface_firewall
+  changed_when: false
+  failed_when: false
+
+- name: Trust tailscale0 interface
+  ansible.builtin.command: firewall-cmd --permanent --zone=trusted --add-interface=tailscale0
+  when:
+    - common_manage_firewalld | bool
+    - tailscale_interface_firewall.rc != 0
+  notify: Reload firewalld
+  changed_when: true

@@ -1,0 +1,30 @@
+[Unit]
+Description=Headscale coordination server
+Documentation=https://headscale.net/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ headscale_user }}
+Group={{ headscale_group }}
+WorkingDirectory={{ headscale_data_dir }}
+ExecStart={{ headscale_binary_path }} serve --config {{ headscale_config_dir }}/config.yaml
+Restart=on-failure
+RestartSec=5s
+RuntimeDirectory=headscale
+RuntimeDirectoryMode=0770
+StateDirectory=headscale
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ headscale_data_dir }}
+ReadWritePaths={{ headscale_runtime_dir }}
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+

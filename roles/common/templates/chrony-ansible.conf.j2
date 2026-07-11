@@ -1,0 +1,4 @@
+{% for server in common_ntp_servers %}
+server {{ server }} iburst
+{% endfor %}
+

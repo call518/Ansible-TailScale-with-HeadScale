@@ -1,0 +1,13 @@
+[headscale]
+tailscale-head ansible_host=192.168.156.100
+
+[tailscale_routers]
+tailscale-01 ansible_host=192.168.156.101
+tailscale-02 ansible_host=192.168.156.102
+
+[tailscale:children]
+headscale
+tailscale_routers
+
+[tailscale:vars]
+ansible_user=root

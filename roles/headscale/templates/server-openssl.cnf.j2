@@ -1,0 +1,28 @@
+[ req ]
+default_bits = 4096
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+
+[ dn ]
+C = {{ headscale_ca_dn.country }}
+ST = {{ headscale_ca_dn.state }}
+L = {{ headscale_ca_dn.locality }}
+O = {{ headscale_ca_dn.organization }}
+OU = {{ headscale_ca_dn.organizational_unit }}
+CN = {{ headscale_host }}
+
+[ req_ext ]
+subjectAltName = @alt_names
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+
+[ alt_names ]
+{% for name in headscale_cert_dns_sans %}
+DNS.{{ loop.index }} = {{ name }}
+{% endfor %}
+{% for address in headscale_cert_ip_sans %}
+IP.{{ loop.index }} = {{ address }}
+{% endfor %}
+

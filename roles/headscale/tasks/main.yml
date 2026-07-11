@@ -1,0 +1,232 @@
+---
+- name: Create Headscale system account
+  ansible.builtin.user:
+    name: "{{ headscale_user }}"
+    system: true
+    create_home: true
+    home: "{{ headscale_data_dir }}"
+    shell: /sbin/nologin
+
+- name: Create Headscale directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ headscale_pki_dir }}", owner: root, group: root, mode: "0700" }
+    - { path: "{{ headscale_config_dir }}", owner: root, group: "{{ headscale_group }}", mode: "0750" }
+    - { path: "{{ headscale_config_dir }}/tls", owner: root, group: "{{ headscale_group }}", mode: "0750" }
+    - { path: "{{ headscale_data_dir }}", owner: "{{ headscale_user }}", group: "{{ headscale_group }}", mode: "0750" }
+    - { path: "{{ headscale_data_dir }}/cache", owner: "{{ headscale_user }}", group: "{{ headscale_group }}", mode: "0750" }
+    - { path: "{{ headscale_runtime_dir }}", owner: "{{ headscale_user }}", group: "{{ headscale_group }}", mode: "0770" }
+
+- name: Download Headscale binary
+  ansible.builtin.get_url:
+    url: "https://github.com/juanfont/headscale/releases/download/v{{ headscale_version }}/headscale_{{ headscale_version }}_linux_{{ headscale_arch }}"
+    dest: "{{ headscale_binary_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+    checksum: "{{ headscale_binary_checksum if headscale_binary_checksum else omit }}"
+  register: headscale_binary
+  notify: Restart headscale
+
+- name: Restore binary SELinux context  # noqa no-handler
+  ansible.builtin.command: "restorecon -v {{ headscale_binary_path }}"
+  when: headscale_binary.changed
+  changed_when: true
+  failed_when: false
+
+- name: Render CA OpenSSL configuration
+  ansible.builtin.template:
+    src: ca-openssl.cnf.j2
+    dest: "{{ headscale_pki_dir }}/ca-openssl.cnf"
+    owner: root
+    group: root
+    mode: "0600"
+  register: ca_config
+
+- name: Check CA files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ headscale_pki_dir }}/headscale-root-ca.key"
+    - "{{ headscale_pki_dir }}/headscale-root-ca.crt"
+  register: ca_files
+
+- name: Generate internal CA private key
+  ansible.builtin.command:
+    argv: [openssl, genrsa, -out, "{{ headscale_pki_dir }}/headscale-root-ca.key", "4096"]
+  when: ca_config.changed or not ca_files.results[0].stat.exists
+  no_log: true
+  changed_when: true
+
+- name: Generate internal CA certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -new
+      - -sha256
+      - -days
+      - "{{ headscale_ca_days | string }}"
+      - -key
+      - "{{ headscale_pki_dir }}/headscale-root-ca.key"
+      - -out
+      - "{{ headscale_pki_dir }}/headscale-root-ca.crt"
+      - -config
+      - "{{ headscale_pki_dir }}/ca-openssl.cnf"
+  when: ca_config.changed or not ca_files.results[1].stat.exists
+  register: ca_generated
+  changed_when: true
+
+- name: Render server OpenSSL configuration
+  ansible.builtin.template:
+    src: server-openssl.cnf.j2
+    dest: "{{ headscale_pki_dir }}/server-openssl.cnf"
+    owner: root
+    group: root
+    mode: "0600"
+  register: server_cert_config
+
+- name: Check server certificate files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ headscale_pki_dir }}/tailscale-head.key"
+    - "{{ headscale_pki_dir }}/tailscale-head.crt"
+  register: server_cert_files
+
+- name: Generate server private key
+  ansible.builtin.command:
+    argv: [openssl, genrsa, -out, "{{ headscale_pki_dir }}/tailscale-head.key", "4096"]
+  when: server_cert_config.changed or ca_generated.changed or not server_cert_files.results[0].stat.exists
+  no_log: true
+  changed_when: true
+
+- name: Generate and sign server certificate
+  ansible.builtin.shell: >-
+    openssl req -new
+    -key {{ headscale_pki_dir }}/tailscale-head.key
+    -out {{ headscale_pki_dir }}/tailscale-head.csr
+    -config {{ headscale_pki_dir }}/server-openssl.cnf
+    && openssl x509 -req -sha256 -days {{ headscale_cert_days }}
+    -in {{ headscale_pki_dir }}/tailscale-head.csr
+    -CA {{ headscale_pki_dir }}/headscale-root-ca.crt
+    -CAkey {{ headscale_pki_dir }}/headscale-root-ca.key
+    -CAcreateserial -out {{ headscale_pki_dir }}/tailscale-head.crt
+    -extensions req_ext -extfile {{ headscale_pki_dir }}/server-openssl.cnf
+  when: >-
+    server_cert_config.changed or ca_generated.changed or
+    not server_cert_files.results[0].stat.exists or
+    not server_cert_files.results[1].stat.exists
+  register: server_cert_generated
+  changed_when: true
+
+- name: Protect private keys
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - "{{ headscale_pki_dir }}/headscale-root-ca.key"
+    - "{{ headscale_pki_dir }}/tailscale-head.key"
+
+- name: Install CA in Headscale host trust store
+  ansible.builtin.copy:
+    src: "{{ headscale_pki_dir }}/headscale-root-ca.crt"
+    remote_src: true
+    dest: /etc/pki/ca-trust/source/anchors/headscale-root-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  register: head_ca_trust
+
+- name: Update Headscale host trust store  # noqa no-handler
+  ansible.builtin.command: update-ca-trust
+  when: head_ca_trust.changed
+  changed_when: true
+
+- name: Install Headscale TLS files
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    remote_src: true
+    dest: "{{ item.dest }}"
+    owner: root
+    group: "{{ headscale_group }}"
+    mode: "0640"
+  loop:
+    - { src: "{{ headscale_pki_dir }}/tailscale-head.crt", dest: "{{ headscale_config_dir }}/tls/server.crt" }
+    - { src: "{{ headscale_pki_dir }}/tailscale-head.key", dest: "{{ headscale_config_dir }}/tls/server.key" }
+  notify: Restart headscale
+
+- name: Install Headscale configuration files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: "{{ headscale_group }}"
+    mode: "0640"
+  loop:
+    - { src: config.yaml.j2, dest: "{{ headscale_config_dir }}/config.yaml" }
+    - { src: policy.hujson.j2, dest: "{{ headscale_config_dir }}/policy.hujson" }
+  notify: Restart headscale
+
+- name: Validate Headscale configuration
+  ansible.builtin.command:
+    argv: ["{{ headscale_binary_path }}", configtest, --config, "{{ headscale_config_dir }}/config.yaml"]
+  changed_when: false
+
+- name: Install Headscale systemd unit
+  ansible.builtin.template:
+    src: headscale.service.j2
+    dest: /etc/systemd/system/headscale.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart headscale
+
+- name: Check Headscale firewall ports
+  ansible.builtin.command: "firewall-cmd --permanent --query-port={{ item }}"
+  loop:
+    - "{{ headscale_listen_port }}/tcp"
+    - "{{ headscale_stun_port }}/udp"
+  when: common_manage_firewalld | bool
+  register: headscale_firewall_checks
+  changed_when: false
+  failed_when: false
+
+- name: Open Headscale firewall ports
+  ansible.builtin.command: "firewall-cmd --permanent --add-port={{ item.item }}"
+  loop: "{{ headscale_firewall_checks.results | default([]) }}"
+  when:
+    - common_manage_firewalld | bool
+    - item.rc != 0
+  notify: Reload firewalld
+  changed_when: true
+
+- name: Flush handlers before API operations
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Headscale
+  ansible.builtin.systemd_service:
+    name: headscale
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Read Headscale users
+  ansible.builtin.command:
+    argv: ["{{ headscale_binary_path }}", users, list, --output, json]
+  register: headscale_users
+  changed_when: false
+
+- name: Create Headscale user
+  ansible.builtin.command:
+    argv: ["{{ headscale_binary_path }}", users, create, "{{ headscale_namespace }}"]
+  when: headscale_namespace not in (headscale_users.stdout | from_json | map(attribute='name') | list)
+  changed_when: true
