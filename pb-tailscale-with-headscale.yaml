@@ -5,16 +5,21 @@
   gather_facts: false
   vars_files:
     - vars-common.yaml
+  tags:
+    - ssh_bootstrap
   roles:
     - role: ssh_bootstrap
       tags:
         - ssh_bootstrap
+
 - name: Apply common baseline
   hosts: tailscale
   become: true
   gather_facts: false
   vars_files:
     - vars-common.yaml
+  tags:
+    - common
   roles:
     - role: common
       tags:
@@ -26,6 +31,8 @@
   gather_facts: false
   vars_files:
     - vars-common.yaml
+  tags:
+    - headscale
   roles:
     - role: headscale
       tags:
@@ -38,6 +45,8 @@
   serial: 1
   vars_files:
     - vars-common.yaml
+  tags:
+    - tailscale_router
   roles:
     - role: tailscale_router
       tags:

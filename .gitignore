@@ -1,0 +1,32 @@
+# Ansible local cache and runtime files
+.ansible/
+*.retry
+facts/
+fact_cache/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# Local editor settings
+.idea/
+.vscode/
+
+# Local environment and secret files
+.env
+.env.*
+!.env.example
+.vault_pass
+.vault-password
+vault_password_file
+
+# Private keys and local certificates
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
