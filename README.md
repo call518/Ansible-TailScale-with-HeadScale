@@ -31,10 +31,10 @@ ssh_copy_id_identity_file: /root/.ssh/id_rsa
 ssh_copy_id_public_key_file: "{{ ssh_copy_id_identity_file }}.pub"
 ```
 
-첫 Play는 제어 노드에서 각 inventory 호스트의 키 로그인을 먼저 확인한다. 이미
-접속 가능한 호스트는 건너뛰고, 접속할 수 없는 호스트에만 `ssh-copy-id`를 실행한
-후 원격 Role을 시작한다. 초기 키 배포가 끝난 뒤에는 다음 실행부터
-`ssh_copy_id_enabled: false`로 되돌려도 된다.
+첫 Play는 모든 inventory 호스트에 `ssh-copy-id`를 실행한다. 원격
+`authorized_keys`에 동일한 공개키가 이미 있으면 `ssh-copy-id` 자체 검사로 중복
+추가하지 않으며, 지정 키가 바뀌었거나 없을 때만 비밀번호 인증 후 추가한다. 초기
+키 배포가 끝난 뒤에는 다음 실행부터 `ssh_copy_id_enabled: false`로 되돌려도 된다.
 
 실제 환경에 맞게 `inventory.lst`를 수정한다. 호스트명은 inventory의 호스트 이름으로,
 관리 IP는 `ansible_host`로 지정한다. `host_alias`, `site_nic`, `site_cidr`, 인증서

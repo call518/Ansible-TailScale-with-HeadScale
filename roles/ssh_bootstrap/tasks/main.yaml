@@ -44,31 +44,7 @@
     label: "{{ item }}"
   when: ssh_copy_id_enabled | bool
 
-- name: Test existing passwordless SSH access
-  ansible.builtin.command:
-    argv:
-      - ssh
-      - -i
-      - "{{ ssh_copy_id_identity_file }}"
-      - -o
-      - BatchMode=yes
-      - -o
-      - "ConnectTimeout={{ ssh_copy_id_connect_timeout }}"
-      - -o
-      - "StrictHostKeyChecking={{ ssh_copy_id_strict_host_key_checking }}"
-      - -p
-      - "{{ hostvars[item].ansible_port | default(22) | string }}"
-      - "{{ hostvars[item].ansible_user | default('root') }}@{{ hostvars[item].ansible_host }}"
-      - "true"
-  loop: "{{ groups['tailscale'] }}"
-  loop_control:
-    label: "{{ item }} ({{ hostvars[item].ansible_host }})"
-  register: ssh_access_checks
-  when: ssh_copy_id_enabled | bool
-  changed_when: false
-  failed_when: false
-
-- name: Install SSH public key on hosts requiring bootstrap
+- name: Ensure selected SSH public key is installed on every host
   ansible.builtin.command:
     argv:
       - ssh-copy-id
@@ -79,12 +55,13 @@
       - -o
       - "StrictHostKeyChecking={{ ssh_copy_id_strict_host_key_checking }}"
       - -p
-      - "{{ hostvars[item.item].ansible_port | default(22) | string }}"
-      - "{{ hostvars[item.item].ansible_user | default('root') }}@{{ hostvars[item.item].ansible_host }}"
-  loop: "{{ ssh_access_checks.results | default([]) }}"
+      - "{{ hostvars[item].ansible_port | default(22) | string }}"
+      - "{{ hostvars[item].ansible_user | default('root') }}@{{ hostvars[item].ansible_host }}"
+  loop: "{{ groups['tailscale'] }}"
   loop_control:
-    label: "{{ item.item }} ({{ hostvars[item.item].ansible_host }})"
-  when:
-    - ssh_copy_id_enabled | bool
-    - item.rc != 0
-  changed_when: true
+    label: "{{ item }} ({{ hostvars[item].ansible_host }})"
+  register: ssh_copy_id_results
+  when: ssh_copy_id_enabled | bool
+  changed_when: >-
+    'All keys were skipped' not in
+    (ssh_copy_id_results.stdout + ssh_copy_id_results.stderr)
