@@ -107,3 +107,16 @@
       retries: 6
       delay: 5
       until: route_approval.rc == 0
+
+- name: Validate Site-to-Site routing with temporary network namespaces
+  hosts: tailscale_routers
+  become: true
+  gather_facts: false
+  vars_files:
+    - vars-common.yaml
+  tags:
+    - site_test_endpoint
+  roles:
+    - role: site_test_endpoint
+      tags:
+        - site_test_endpoint

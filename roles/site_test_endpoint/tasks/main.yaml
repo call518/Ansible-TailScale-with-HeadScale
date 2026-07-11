@@ -1,0 +1,52 @@
+---
+- name: End disabled Site-to-Site endpoint validation
+  ansible.builtin.meta: end_play
+  when: not (tailscale_site_test_enabled | bool)
+
+- name: Validate Site-to-Site endpoint variables
+  ansible.builtin.assert:
+    that:
+      - site_test_ip is defined
+      - site_test_ip | length > 0
+      - groups['tailscale_routers'] | length > 1
+    fail_msg: >-
+      Each router requires site_test_ip in inventory.lst and validation
+      requires at least two tailscale_routers.
+
+- name: Install temporary Site endpoint setup script
+  ansible.builtin.template:
+    src: site-test-endpoint.sh.j2
+    dest: /usr/local/sbin/tailscale-site-test-endpoint
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create temporary Site endpoint
+  ansible.builtin.command: /usr/local/sbin/tailscale-site-test-endpoint setup
+  changed_when: true
+
+- name: Validate Site-to-Site endpoint connectivity
+  block:
+    - name: Test remote Site endpoints
+      ansible.builtin.command:
+        argv:
+          - ip
+          - netns
+          - exec
+          - "{{ tailscale_site_test_namespace }}"
+          - ping
+          - -c
+          - "4"
+          - -W
+          - "2"
+          - "{{ hostvars[item].site_test_ip }}"
+      loop: "{{ groups['tailscale_routers'] | difference([inventory_hostname]) }}"
+      loop_control:
+        label: "{{ inventory_hostname }} -> {{ item }} ({{ hostvars[item].site_test_ip }})"
+      register: site_test_ping
+      changed_when: false
+  always:
+    - name: Remove temporary Site endpoint after validation
+      ansible.builtin.command: /usr/local/sbin/tailscale-site-test-endpoint cleanup
+      when: tailscale_site_test_cleanup_after_validation | bool
+      changed_when: true

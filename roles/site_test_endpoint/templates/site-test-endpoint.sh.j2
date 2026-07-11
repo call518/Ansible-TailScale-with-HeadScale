@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+NS={{ tailscale_site_test_namespace | quote }}
+TEST_IP={{ site_test_ip | quote }}
+VETH_HOST={{ tailscale_site_test_veth_host | quote }}
+VETH_NS={{ tailscale_site_test_veth_namespace | quote }}
+TRANSIT_HOST={{ tailscale_site_test_transit_host | quote }}
+TRANSIT_NS={{ tailscale_site_test_transit_namespace | quote }}
+TRANSIT_PREFIX={{ tailscale_site_test_transit_prefix }}
+
+cleanup() {
+    ip netns del "$NS" 2>/dev/null || true
+    ip link del "$VETH_HOST" 2>/dev/null || true
+}
+
+setup() {
+    cleanup
+
+    ip netns add "$NS"
+    ip link add "$VETH_HOST" type veth peer name "$VETH_NS"
+    ip link set "$VETH_NS" netns "$NS"
+
+    ip addr add "$TRANSIT_HOST/$TRANSIT_PREFIX" dev "$VETH_HOST"
+    ip link set "$VETH_HOST" up
+
+    ip netns exec "$NS" ip link set lo up
+    ip netns exec "$NS" ip link set "$VETH_NS" up
+    ip netns exec "$NS" \
+        ip addr add "$TRANSIT_NS/$TRANSIT_PREFIX" dev "$VETH_NS"
+    ip netns exec "$NS" ip addr add "$TEST_IP/32" dev lo
+    ip netns exec "$NS" \
+        ip route add default via "$TRANSIT_HOST" dev "$VETH_NS" src "$TEST_IP"
+
+    ip route replace "$TEST_IP/32" via "$TRANSIT_NS" dev "$VETH_HOST"
+}
+
+case "${1:-setup}" in
+    setup)
+        setup
+        ;;
+    cleanup)
+        cleanup
+        ;;
+    *)
+        echo "Usage: $0 {setup|cleanup}" >&2
+        exit 2
+        ;;
+esac

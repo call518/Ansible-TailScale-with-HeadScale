@@ -43,6 +43,7 @@ Debian/Ubuntu 등 다른 계열 OS에 적용하려면 패키지 관리, CA trust
 - `roles/common`: 공통 OS, 시간 동기화, hosts, 패키지, 선택적 firewalld
 - `roles/headscale`: CA/TLS, Headscale binary/config/policy/systemd/user
 - `roles/tailscale_router`: CA trust, Tailscale, forwarding, MSS Clamping, 노드 등록
+- `roles/site_test_endpoint`: 선택적 netns 가상 단말 생성 및 Site 간 ping 검증
 - `pb-tailscale-with-headscale.yaml`: 전체 실행 순서와 subnet route 승인
 - `run.sh`: 플레이북 실행 진입점
 
@@ -110,6 +111,39 @@ tailscale_interface: tailscale0
 특수한 환경에서 외부 방화벽 관리 도구가 같은 규칙을 전담할 때만
 `tailscale_manage_mss_clamping: false`로 비활성화한다.
 
+## Site-to-Site 패킷 흐름
+
+Site-A 단말이 Site-B 단말로 통신할 때의 직접 연결 기준 경로는 다음과 같다.
+
+```text
+Site-A Client 10.10.10.10
+Gateway 10.10.10.101
+        │ ① Site-A Router가 패킷을 수신하고
+        │    10.10.20.0/24의 경로를 tailscale0으로 결정
+        ▼
+Site-A Router ens224 → tailscale0
+        │ ② tailscaled가 Site-B Router를 Peer로 선택하고
+        │    원본 패킷을 암호화·UDP 캡슐화
+        ▼
+Site-A Router ens160  192.168.156.101
+        │ ③ Underlay 직접 전송
+        │    192.168.156.101 → 192.168.156.102
+        ▼
+Site-B Router ens160  192.168.156.102
+        │ ④ Peer 검증 후 복호화하여 tailscale0에 주입
+        │    Linux가 10.10.20.0/24의 경로를 ens224로 결정
+        ▼
+Site-B Router tailscale0 → ens224
+        │ ⑤ Site-B LAN으로 원본 패킷 전달
+        ▼
+Site-B Client 10.10.20.10
+```
+
+`--snat-subnet-routes=false` 설정으로 Site-B 단말에는 원본 출발지
+`10.10.10.10`이 유지된다. 따라서 양쪽 단말은 각 Site Router를 기본 게이트웨이로
+사용하거나 반대편 Site CIDR에 대한 정적 경로를 가져야 한다. Router 간 직접 UDP
+연결이 불가능하면 암호화된 트래픽은 Headscale의 Embedded DERP를 경유한다.
+
 ## 실행
 
 ```bash
@@ -141,6 +175,7 @@ Role 또는 단계별 단독 실행은 태그를 사용한다.
 ./run.sh --tags headscale
 ./run.sh --tags tailscale_router
 ./run.sh --tags route_approval
+./run.sh --tags site_test_endpoint -e tailscale_site_test_enabled=true
 ```
 
 비활성화된 SSH Bootstrap을 일회성으로 실행하려면 vars 파일을 수정하지 않고도
@@ -165,6 +200,40 @@ Role 또는 단계별 단독 실행은 태그를 사용한다.
 
 최초 전체 구성에서는 `--limit`을 사용하지 않는다. Headscale 구성, 라우터 등록,
 광고 route 승인 순서가 필요하기 때문이다.
+
+## 선택적 netns 가상 단말 검증
+
+실제 Site 단말 없이도 각 Router에 임시 Linux network namespace와 veth를 생성하여
+Site-to-Site 데이터 경로를 검증할 수 있다. 테스트 IP는 `inventory.lst`의
+`site_test_ip`에서 호스트별로 지정한다.
+
+```ini
+tailscale-01 ... site_test_ip=10.10.10.201
+tailscale-02 ... site_test_ip=10.10.20.202
+```
+
+전체 설치와 route 승인이 끝난 후 실행한다.
+
+```bash
+./run.sh --tags site_test_endpoint -e tailscale_site_test_enabled=true
+```
+
+Role은 양쪽 netns를 생성하고 A→B 및 B→A ping을 자동 검증한다. 기본값은 테스트
+환경을 만들지 않는 `false`이며, 검증 후 자동 삭제하려면 다음 옵션을 추가한다.
+
+```bash
+./run.sh --tags site_test_endpoint \
+  -e tailscale_site_test_enabled=true \
+  -e tailscale_site_test_cleanup_after_validation=true
+```
+
+남겨둔 테스트 환경은 각 Router에서 다음처럼 수동 확인·삭제할 수 있다.
+
+```bash
+ip netns exec ns-test ping -c 4 <반대편-site_test_ip>
+ip netns exec ns-test traceroute <반대편-site_test_ip>
+/usr/local/sbin/tailscale-site-test-endpoint cleanup
+```
 
 ## 재실행과 변수 변경
 
