@@ -30,3 +30,43 @@ vault_password_file
 *.pfx
 id_rsa*
 id_ed25519*
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and interpreter caches
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+
+# Python test, coverage, lint, and type-check caches
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.pyright/
+.pyre/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.dmypy.json
+dmypy.json
+
+# Python build and package artifacts
+build/
+dist/
+site/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# Jupyter temporary files
+.ipynb_checkpoints/
