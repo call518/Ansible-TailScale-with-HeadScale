@@ -1,25 +1,56 @@
-# Headscale + Tailscale Site-to-Site Ansible
+# Headscale + Tailscale Site-to-Site VPN with Ansible
 
-Rocky Linux 10 노드 3대에 내부 CA 기반 Headscale와 Tailscale subnet router 2대를
-구성한다. 첨부 절차서의 3장부터 24.3장까지 필요한 설치·설정 작업을 Role로
-자동화했으며, 테스트 VM 자체의 OS 설정은 관리 대상에 포함하지 않는다.
+내부 CA 기반 Headscale 제어 서버와 Tailscale subnet router를 배포하여
+온프레미스 Site-to-Site L3 VPN을 구성하는 Ansible Role 기반 IaC 프로젝트다.
+Embedded DERP, subnet route 승인, IP forwarding 및 MSS Clamping까지 자동화하며,
+각 Site의 테스트 단말과 NetworkManager NIC 연결 프로파일은 관리 대상에 포함하지
+않는다.
+
+## 검증 환경 및 요구사항
+
+현재 구성과 테스트에 사용한 기준 환경은 다음과 같다.
+
+| 구분 | 검증 환경 |
+|---|---|
+| Ansible 제어 노드 | Ansible Core 2.17.4 |
+| 제어 노드 Python | Python 3.12.12 |
+| 관리 대상 OS | Rocky Linux 10 |
+| Headscale | 0.29.1 standalone binary |
+| Tailscale | Tailscale stable RHEL repository 패키지 |
+
+Ansible Core 2.17.4 이상 사용을 권장한다. 더 낮은 버전에서는 사용 중인 module,
+Jinja filter 및 task 동작의 호환성을 보장하지 않는다.
+
+Rocky Linux 10에서 실제 동작을 검증했으며 지원 대상을 Rocky Linux 10만으로
+제한하지 않는다. 다만 현재 Role은 `dnf`, systemd, `update-ca-trust`, RHEL 계열
+패키지명과 파일 경로를 사용하므로 다른 RHEL 호환 배포판에서는 별도 검증이 필요하다.
+Debian/Ubuntu 등 다른 계열 OS에 적용하려면 패키지 관리, CA trust, 방화벽 및 서비스
+경로를 해당 OS에 맞게 조정해야 한다.
+
+제어 노드에는 다음 명령이 필요하다.
+
+- `ansible-playbook`
+- `ssh`
+- `ssh-copy-id` — SSH Bootstrap을 사용할 때
+
+관리 대상 노드는 초기 NIC/IP 구성이 끝나 있고 SSH 접속이 가능해야 한다.
 
 ## 파일 구조
 
 - `vars-common.yaml`: 모든 노드에 공통인 버전, 경로, 인증서 DN, 포트 및 동작 변수
 - `inventory.lst`: Ansible 접속 대상과 관리 IP
 - `roles/ssh_bootstrap`: 선택적 `ssh-copy-id` 기반 SSH 키 초기 배포
-- `roles/common`: 공통 OS, 시간 동기화, hosts, 패키지, firewalld
+- `roles/common`: 공통 OS, 시간 동기화, hosts, 패키지, 선택적 firewalld
 - `roles/headscale`: CA/TLS, Headscale binary/config/policy/systemd/user
-- `roles/tailscale_router`: CA trust, Tailscale, forwarding, 방화벽, 노드 등록
+- `roles/tailscale_router`: CA trust, Tailscale, forwarding, MSS Clamping, 노드 등록
 - `pb-tailscale-with-headscale.yaml`: 전체 실행 순서와 subnet route 승인
 - `run.sh`: 플레이북 실행 진입점
 
 ## 실행 전 준비
 
-제어 노드에 Ansible이 설치되어 있고 세 노드에 SSH 접속 및 `become`이 가능해야
-한다. 기본값은 `root` 접속이다. 다른 계정이나 SSH 키를 쓰면 `inventory.lst`의
-`ansible_user` 및 필요 접속 변수를 조정한다.
+제어 노드에서 세 노드에 SSH 접속 및 `become`이 가능해야 한다. 현재 inventory의
+기본값은 `root` 접속이다. 다른 계정이나 SSH 키를 쓰면 `inventory.lst`의
+`ansible_user`, `ansible_port` 및 필요한 접속 변수를 조정한다.
 
 Passwordless SSH가 준비되지 않은 환경에서는 `vars-common.yaml`에서 다음 값을
 설정한다. 개인키와 같은 이름의 `.pub` 공개키가 있어야 하며, 비밀번호는 파일에
@@ -93,6 +124,15 @@ SSH 키를 지정하는 등 일반 `ansible-playbook` 옵션을 그대로 전달
 ./run.sh --check --diff
 ```
 
+`--check`는 template, package 등 일반 Ansible module의 예상 변경 확인에는 유용하지만,
+Pre-auth key 생성, `tailscale up`, route 승인 및 `ssh-copy-id` 같은 command 기반
+작업의 전체 실행 결과를 재현하지는 않는다. SSH Bootstrap을 사용하지 않는 check
+mode 실행에서는 `ssh_copy_id_enabled=false`를 함께 지정하는 것을 권장한다.
+
+```bash
+./run.sh --check --diff -e ssh_copy_id_enabled=false
+```
+
 Role 또는 단계별 단독 실행은 태그를 사용한다.
 
 ```bash
@@ -128,7 +168,7 @@ Role 또는 단계별 단독 실행은 태그를 사용한다.
 
 ## 재실행과 변수 변경
 
-플레이북은 반복 실행을 전제로 한다. 이미 등록된 Tailscale 노드는 새 pre-auth key를
+플레이북은 반복 실행을 전제로 한다. 이미 등록된 Tailscale 노드는 새 Pre-auth key를
 만들지 않고 `tailscale up`으로 원하는 설정을 재조정한다. 미등록 노드에만 Headscale가
 일회용 키를 생성하며 Ansible 출력에는 키를 숨긴다.
 
@@ -138,6 +178,7 @@ Role 또는 단계별 단독 실행은 태그를 사용한다.
 - forwarding 변경: `sysctl --system` 적용
 - site CIDR 변경: router 광고 설정 재적용 후 Headscale에서 승인
 - site NIC 변경: 새 NIC를 firewalld trusted zone에 추가
+- MSS Clamping 변경: systemd oneshot 서비스로 중복 없이 재적용
 
 기존 NIC를 trusted zone에서 자동 제거하지는 않는다. 한 노드에 trusted NIC가 여러
 개일 수 있고, Ansible이 소유하지 않은 방화벽 설정을 임의 삭제하면 장애가 날 수 있기
@@ -160,6 +201,8 @@ ansible tailscale -b -m command -a 'systemctl is-active firewalld'
 ansible headscale -b -m command -a 'headscale nodes list-routes'
 ansible tailscale_routers -b -m command -a 'tailscale status'
 ansible tailscale_routers -b -m command -a 'sysctl net.ipv4.ip_forward'
+ansible tailscale_routers -b -m command -a 'systemctl is-active tailscale-mss-clamping'
+ansible tailscale_routers -b -m command -a 'iptables -t mangle -S FORWARD'
 ```
 
 최종 데이터 경로는 각 Site 테스트 단말에서 상대편 단말로 `ping`, `traceroute`를
