@@ -5,7 +5,7 @@
     system: true
     create_home: true
     home: "{{ headscale_data_dir }}"
-    shell: /sbin/nologin
+    shell: "{{ headscale_nologin_shell }}"
 
 - name: Validate Headscale runtime directory
   ansible.builtin.assert:
@@ -187,14 +187,15 @@
   ansible.builtin.copy:
     src: "{{ headscale_pki_dir }}/headscale-root-ca.crt"
     remote_src: true
-    dest: /etc/pki/ca-trust/source/anchors/headscale-root-ca.crt
+    dest: "{{ common_ca_trust_directory }}/headscale-root-ca.crt"
     owner: root
     group: root
     mode: "0644"
   register: head_ca_trust
 
 - name: Update Headscale host trust store  # noqa no-handler
-  ansible.builtin.command: update-ca-trust
+  ansible.builtin.command:
+    argv: "{{ common_ca_update_command }}"
   when: head_ca_trust.changed
   changed_when: true
 

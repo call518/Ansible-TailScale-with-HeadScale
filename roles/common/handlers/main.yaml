@@ -1,7 +1,7 @@
 ---
-- name: Restart chronyd
+- name: Restart chrony
   ansible.builtin.service:
-    name: chronyd
+    name: "{{ common_chrony_service }}"
     state: restarted
 
 - name: Reload firewalld

@@ -15,12 +15,13 @@
 - name: Apply common baseline
   hosts: tailscale
   become: true
-  gather_facts: false
+  gather_facts: true
   vars_files:
     - vars-common.yaml
   tags:
     - common
   roles:
+    - role: os_compat
     - role: common
       tags:
         - common
@@ -28,12 +29,13 @@
 - name: Install and configure Headscale
   hosts: headscale
   become: true
-  gather_facts: false
+  gather_facts: true
   vars_files:
     - vars-common.yaml
   tags:
     - headscale
   roles:
+    - role: os_compat
     - role: headscale
       tags:
         - headscale
@@ -41,13 +43,14 @@
 - name: Install and register Tailscale subnet routers
   hosts: tailscale_routers
   become: true
-  gather_facts: false
+  gather_facts: true
   serial: 1
   vars_files:
     - vars-common.yaml
   tags:
     - tailscale_router
   roles:
+    - role: os_compat
     - role: tailscale_router
       tags:
         - tailscale_router
@@ -109,7 +112,7 @@
       until: route_approval.rc == 0
 
 - name: Validate Site-to-Site routing with temporary network namespaces
-  hosts: site_test_endpoints
+  hosts: "{{ groups['site_test_endpoints'] | default([]) }}"
   become: true
   gather_facts: false
   vars_files:

@@ -19,9 +19,15 @@
     marker: "# {mark} ANSIBLE MANAGED HEADSCALE LAB"
     block: "{{ lookup('ansible.builtin.template', 'hosts.j2') }}"
 
+- name: Update APT package cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+
 - name: Install common packages
-  ansible.builtin.dnf:
-    name: "{{ common_packages + ['chrony'] }}"
+  ansible.builtin.package:
+    name: "{{ common_os_packages + ['chrony'] }}"
     state: present
 
 - name: Install firewalld when managed
@@ -32,18 +38,18 @@
 
 - name: Configure NTP servers
   ansible.builtin.blockinfile:
-    path: /etc/chrony.conf
+    path: "{{ common_chrony_config_path }}"
     marker: "# {mark} ANSIBLE MANAGED NTP SERVERS"
     block: |-
       {% for server in common_ntp_servers %}
       server {{ server }} iburst
       {% endfor %}
     state: "{{ 'present' if common_ntp_servers | length > 0 else 'absent' }}"
-  notify: Restart chronyd
+  notify: Restart chrony
 
 - name: Enable time synchronization
   ansible.builtin.service:
-    name: chronyd
+    name: "{{ common_chrony_service }}"
     enabled: true
     state: started
 

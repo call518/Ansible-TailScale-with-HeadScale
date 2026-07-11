@@ -13,7 +13,8 @@ common_ntp_servers:
   - 1.asia.pool.ntp.org
   - 2.asia.pool.ntp.org
   - 3.asia.pool.ntp.org
-common_packages:
+common_packages_redhat:
+  - ca-certificates
   - curl
   - wget
   - jq
@@ -25,6 +26,25 @@ common_packages:
   - tcpdump
   - traceroute
   - nmap-ncat
+  - net-tools
+  - lsof
+  - bind-utils
+common_packages_debian:
+  - ca-certificates
+  - curl
+  - wget
+  - jq
+  - openssl
+  - tar
+  - iproute2
+  - iputils-ping
+  - dnsutils
+  - tcpdump
+  - traceroute
+  - netcat-openbsd
+  - lsof
+  - net-tools
+  - dnsutils
 common_manage_firewalld: false
 common_manage_selinux: false
 
@@ -118,8 +138,6 @@ headscale_ca_dn:
   organizational_unit: Infrastructure
   common_name: Headscale Lab Root CA
 # Tailscale subnet router
-tailscale_repo_url: https://pkgs.tailscale.com/stable/rhel/9/tailscale.repo
-tailscale_repo_path: /etc/yum.repos.d/tailscale.repo
 tailscale_package: tailscale
 tailscale_udp_port: 41641
 tailscale_accept_routes: true

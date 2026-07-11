@@ -1,0 +1,30 @@
+---
+- name: Validate supported operating system family
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family in ['RedHat', 'Debian']
+    fail_msg: >-
+      Unsupported OS family '{{ ansible_os_family }}' on {{ inventory_hostname }}.
+      Supported targets are Rocky Linux 10 and Ubuntu 26.04 amd64.
+
+- name: Load operating system variables
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/vars/os/{{ ansible_os_family }}.yaml"
+
+- name: Validate supported distribution and architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution in common_supported_distributions
+      - >-
+        ansible_distribution_version is
+        match(common_supported_distribution_version_pattern)
+      - ansible_architecture == 'x86_64'
+      - headscale_arch == 'amd64'
+      - not (common_manage_firewalld | bool) or ansible_os_family == 'RedHat'
+      - not (common_manage_selinux | bool) or ansible_os_family == 'RedHat'
+    fail_msg: >-
+      Unsupported target {{ ansible_distribution }}
+      {{ ansible_distribution_version }} ({{ ansible_architecture }}) on
+      {{ inventory_hostname }}. This project currently supports Rocky Linux 10
+      and Ubuntu 26.04 amd64. firewalld and SELinux management are available
+      only on the RedHat OS family.

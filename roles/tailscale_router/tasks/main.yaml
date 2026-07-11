@@ -6,7 +6,7 @@
       - site_nic | length > 0
       - site_cidr is defined
       - site_cidr | length > 0
-    fail_msg: "inventory.lst에서 각 라우터의 site_nic과 site_cidr를 지정해야 합니다."
+    fail_msg: "inventory.ini에서 각 라우터의 site_nic과 site_cidr를 지정해야 합니다."
 
 - name: Read internal CA from Headscale host
   ansible.builtin.slurp:
@@ -18,17 +18,37 @@
 - name: Install internal CA in router trust store
   ansible.builtin.copy:
     content: "{{ headscale_ca.content | b64decode }}"
-    dest: /etc/pki/ca-trust/source/anchors/headscale-root-ca.crt
+    dest: "{{ common_ca_trust_directory }}/headscale-root-ca.crt"
     owner: root
     group: root
     mode: "0644"
   register: router_ca_trust
 
 - name: Update router trust store  # noqa no-handler
-  ansible.builtin.command: update-ca-trust
+  ansible.builtin.command:
+    argv: "{{ common_ca_update_command }}"
   when: router_ca_trust.changed
   notify: Restart tailscaled
   changed_when: true
+
+- name: Create Tailscale APT keyring directory
+  ansible.builtin.file:
+    path: "{{ tailscale_apt_key_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: tailscale_repository_type == 'apt'
+
+- name: Install Tailscale APT signing key
+  ansible.builtin.get_url:
+    url: "{{ tailscale_apt_key_url }}"
+    dest: "{{ tailscale_apt_key_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: tailscale_repository_type == 'apt'
+  register: tailscale_apt_key
 
 - name: Install Tailscale repository definition
   ansible.builtin.get_url:
@@ -37,14 +57,24 @@
     owner: root
     group: root
     mode: "0644"
+  register: tailscale_repository
+
+- name: Update APT cache after repository changes
+  ansible.builtin.apt:
+    update_cache: true
+  when:
+    - tailscale_repository_type == 'apt'
+    - >-
+      tailscale_apt_key.changed | default(false) or
+      tailscale_repository.changed | default(false)
 
 - name: Install Tailscale client
-  ansible.builtin.dnf:
+  ansible.builtin.package:
     name: "{{ tailscale_package }}"
     state: present
 
 - name: Install iptables compatibility tools for MSS clamping
-  ansible.builtin.dnf:
+  ansible.builtin.package:
     name: iptables
     state: present
   when: tailscale_manage_mss_clamping | bool

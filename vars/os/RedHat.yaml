@@ -1,0 +1,14 @@
+---
+common_supported_distributions:
+  - Rocky
+common_supported_distribution_version_pattern: '^10([.].*)?$'
+common_os_packages: "{{ common_packages_redhat }}"
+common_chrony_config_path: /etc/chrony.conf
+common_chrony_service: chronyd
+common_ca_trust_directory: /etc/pki/ca-trust/source/anchors
+common_ca_update_command:
+  - update-ca-trust
+headscale_nologin_shell: /sbin/nologin
+tailscale_repository_type: rpm
+tailscale_repo_url: https://pkgs.tailscale.com/stable/rhel/9/tailscale.repo
+tailscale_repo_path: /etc/yum.repos.d/tailscale.repo
