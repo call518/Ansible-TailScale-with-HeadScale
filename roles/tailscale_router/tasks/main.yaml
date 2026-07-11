@@ -1,9 +1,4 @@
 ---
-- name: Load this router's site definition
-  ansible.builtin.set_fact:
-    site_nic: "{{ tailscale_router_sites[inventory_hostname].site_nic }}"
-    site_cidr: "{{ tailscale_router_sites[inventory_hostname].site_cidr }}"
-
 - name: Validate required router variables
   ansible.builtin.assert:
     that:
@@ -11,7 +6,6 @@
       - site_nic | length > 0
       - site_cidr is defined
       - site_cidr | length > 0
-      - inventory_hostname in tailscale_router_sites
     fail_msg: "inventory.lst에서 각 라우터의 site_nic과 site_cidr를 지정해야 합니다."
 
 - name: Read internal CA from Headscale host
@@ -49,6 +43,12 @@
     name: "{{ tailscale_package }}"
     state: present
 
+- name: Install iptables compatibility tools for MSS clamping
+  ansible.builtin.dnf:
+    name: iptables
+    state: present
+  when: tailscale_manage_mss_clamping | bool
+
 - name: Configure packet forwarding
   ansible.builtin.template:
     src: forwarding.conf.j2
@@ -63,6 +63,50 @@
     name: tailscaled
     enabled: true
     state: started
+
+- name: Install Tailscale MSS clamping script
+  ansible.builtin.template:
+    src: tailscale-mss-clamping.sh.j2
+    dest: /usr/local/sbin/tailscale-mss-clamping
+    owner: root
+    group: root
+    mode: "0755"
+  when: tailscale_manage_mss_clamping | bool
+  notify: Restart Tailscale MSS clamping
+
+- name: Install Tailscale MSS clamping systemd unit
+  ansible.builtin.template:
+    src: tailscale-mss-clamping.service.j2
+    dest: /etc/systemd/system/tailscale-mss-clamping.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: tailscale_manage_mss_clamping | bool
+  notify: Restart Tailscale MSS clamping
+
+- name: Enable and start Tailscale MSS clamping
+  ansible.builtin.systemd_service:
+    name: tailscale-mss-clamping
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: tailscale_manage_mss_clamping | bool
+
+- name: Check existing Tailscale MSS clamping unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/tailscale-mss-clamping.service
+  register: tailscale_mss_clamping_unit
+  when: not (tailscale_manage_mss_clamping | bool)
+
+- name: Disable and stop Tailscale MSS clamping
+  ansible.builtin.systemd_service:
+    name: tailscale-mss-clamping
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when:
+    - not (tailscale_manage_mss_clamping | bool)
+    - tailscale_mss_clamping_unit.stat.exists
 
 - name: Check router firewall configuration
   ansible.builtin.command: "{{ item }}"
@@ -102,6 +146,31 @@
       {{ tailscale_state_command.rc != 0 or
          (tailscale_state_command.stdout | default('{}') | from_json).BackendState | default('') != 'Running' }}
 
+- name: Read Headscale users before key creation
+  ansible.builtin.command:
+    argv: ["{{ headscale_binary_path }}", users, list, --output, json]
+  delegate_to: "{{ groups['headscale'][0] }}"
+  register: router_headscale_users
+  when: tailscale_registration_required | bool
+  changed_when: false
+
+- name: Validate Headscale user for router registration
+  ansible.builtin.assert:
+    that:
+      - headscale_user_name in (router_headscale_users.stdout | from_json | map(attribute='name') | list)
+    fail_msg: >-
+      Headscale user '{{ headscale_user_name }}' does not exist. Run the
+      headscale role before registering routers.
+  when: tailscale_registration_required | bool
+
+- name: Resolve Headscale user ID for router registration
+  ansible.builtin.set_fact:
+    headscale_registration_user_id: >-
+      {{ router_headscale_users.stdout | from_json |
+         selectattr('name', 'equalto', headscale_user_name) |
+         map(attribute='id') | first }}
+  when: tailscale_registration_required | bool
+
 - name: Create one-time Headscale pre-auth key
   ansible.builtin.command:
     argv:
@@ -109,12 +178,25 @@
       - preauthkeys
       - create
       - --user
-      - "{{ headscale_namespace }}"
+      - "{{ headscale_registration_user_id }}"
   delegate_to: "{{ groups['headscale'][0] }}"
   register: router_auth_key
   when: tailscale_registration_required | bool
   no_log: true
-  changed_when: true
+  failed_when: false
+  changed_when: router_auth_key.rc == 0
+
+- name: Report Headscale pre-auth key creation failure
+  ansible.builtin.fail:
+    msg: |-
+      Failed to create a Headscale pre-auth key for user '{{ headscale_user_name }}'.
+      Command exit code: {{ router_auth_key.rc }}
+      Error output:
+      {{ router_auth_key.stderr | default('') }}
+      {{ router_auth_key.stdout | default('') }}
+  when:
+    - tailscale_registration_required | bool
+    - router_auth_key.rc != 0
 
 - name: Register router and apply subnet-router settings
   ansible.builtin.command:

@@ -13,7 +13,7 @@
   when: current_timezone.stdout != common_timezone
   changed_when: true
 
-- name: Manage lab host mappings
+- name: Manage Tailnet host mappings
   ansible.builtin.blockinfile:
     path: /etc/hosts
     marker: "# {mark} ANSIBLE MANAGED HEADSCALE LAB"
@@ -24,13 +24,21 @@
     name: "{{ common_packages + ['chrony'] }}"
     state: present
 
-- name: Configure internal NTP servers
-  ansible.builtin.template:
-    src: chrony-ansible.conf.j2
-    dest: /etc/chrony.d/ansible.conf
-    owner: root
-    group: root
-    mode: "0644"
+- name: Install firewalld when managed
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+  when: common_manage_firewalld | bool
+
+- name: Configure NTP servers
+  ansible.builtin.blockinfile:
+    path: /etc/chrony.conf
+    marker: "# {mark} ANSIBLE MANAGED NTP SERVERS"
+    block: |-
+      {% for server in common_ntp_servers %}
+      server {{ server }} iburst
+      {% endfor %}
+    state: "{{ 'present' if common_ntp_servers | length > 0 else 'absent' }}"
   notify: Restart chronyd
 
 - name: Enable time synchronization

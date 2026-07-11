@@ -1,0 +1,90 @@
+---
+- name: Explain disabled SSH bootstrap
+  ansible.builtin.debug:
+    msg: >-
+      SSH bootstrap is disabled. Set ssh_copy_id_enabled=true in
+      vars-common.yaml or pass -e ssh_copy_id_enabled=true.
+  when: not (ssh_copy_id_enabled | bool)
+
+- name: End disabled SSH bootstrap play
+  ansible.builtin.meta: end_play
+  when: not (ssh_copy_id_enabled | bool)
+
+- name: Check SSH private key
+  ansible.builtin.stat:
+    path: "{{ ssh_copy_id_identity_file }}"
+  register: ssh_private_key
+  when: ssh_copy_id_enabled | bool
+
+- name: Check SSH public key
+  ansible.builtin.stat:
+    path: "{{ ssh_copy_id_public_key_file }}"
+  register: ssh_public_key
+  when: ssh_copy_id_enabled | bool
+
+- name: Validate SSH bootstrap prerequisites
+  ansible.builtin.assert:
+    that:
+      - ssh_private_key.stat.exists
+      - ssh_private_key.stat.isreg
+      - ssh_public_key.stat.exists
+      - ssh_public_key.stat.isreg
+    fail_msg: >-
+      SSH key files were not found. Check ssh_copy_id_identity_file and
+      ssh_copy_id_public_key_file in vars-common.yaml.
+  when: ssh_copy_id_enabled | bool
+
+- name: Apply selected private key to inventory hosts
+  ansible.builtin.set_fact:
+    ansible_ssh_private_key_file: "{{ ssh_copy_id_identity_file }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ groups['tailscale'] }}"
+  loop_control:
+    label: "{{ item }}"
+  when: ssh_copy_id_enabled | bool
+
+- name: Test existing passwordless SSH access
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ ssh_copy_id_identity_file }}"
+      - -o
+      - BatchMode=yes
+      - -o
+      - "ConnectTimeout={{ ssh_copy_id_connect_timeout }}"
+      - -o
+      - "StrictHostKeyChecking={{ ssh_copy_id_strict_host_key_checking }}"
+      - -p
+      - "{{ hostvars[item].ansible_port | default(22) | string }}"
+      - "{{ hostvars[item].ansible_user | default('root') }}@{{ hostvars[item].ansible_host }}"
+      - "true"
+  loop: "{{ groups['tailscale'] }}"
+  loop_control:
+    label: "{{ item }} ({{ hostvars[item].ansible_host }})"
+  register: ssh_access_checks
+  when: ssh_copy_id_enabled | bool
+  changed_when: false
+  failed_when: false
+
+- name: Install SSH public key on hosts requiring bootstrap
+  ansible.builtin.command:
+    argv:
+      - ssh-copy-id
+      - -i
+      - "{{ ssh_copy_id_public_key_file }}"
+      - -o
+      - "ConnectTimeout={{ ssh_copy_id_connect_timeout }}"
+      - -o
+      - "StrictHostKeyChecking={{ ssh_copy_id_strict_host_key_checking }}"
+      - -p
+      - "{{ hostvars[item.item].ansible_port | default(22) | string }}"
+      - "{{ hostvars[item.item].ansible_user | default('root') }}@{{ hostvars[item.item].ansible_host }}"
+  loop: "{{ ssh_access_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }} ({{ hostvars[item.item].ansible_host }})"
+  when:
+    - ssh_copy_id_enabled | bool
+    - item.rc != 0
+  changed_when: true

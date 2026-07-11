@@ -6,12 +6,13 @@ Rocky Linux 10 노드 3대에 내부 CA 기반 Headscale와 Tailscale subnet rou
 
 ## 파일 구조
 
-- `vars-common.yml`: 버전, 경로, 인증서 DN/SAN, 포트, NIC, site CIDR 등 운용 변수
+- `vars-common.yaml`: 모든 노드에 공통인 버전, 경로, 인증서 DN, 포트 및 동작 변수
 - `inventory.lst`: Ansible 접속 대상과 관리 IP
+- `roles/ssh_bootstrap`: 선택적 `ssh-copy-id` 기반 SSH 키 초기 배포
 - `roles/common`: 공통 OS, 시간 동기화, hosts, 패키지, firewalld
 - `roles/headscale`: CA/TLS, Headscale binary/config/policy/systemd/user
 - `roles/tailscale_router`: CA trust, Tailscale, forwarding, 방화벽, 노드 등록
-- `pb-tailscale-with-headscale.yml`: 전체 실행 순서와 subnet route 승인
+- `pb-tailscale-with-headscale.yaml`: 전체 실행 순서와 subnet route 승인
 - `run.sh`: 플레이북 실행 진입점
 
 ## 실행 전 준비
@@ -20,14 +21,63 @@ Rocky Linux 10 노드 3대에 내부 CA 기반 Headscale와 Tailscale subnet rou
 한다. 기본값은 `root` 접속이다. 다른 계정이나 SSH 키를 쓰면 `inventory.lst`의
 `ansible_user` 및 필요 접속 변수를 조정한다.
 
-다음 두 곳을 실제 환경과 함께 수정한다.
+Passwordless SSH가 준비되지 않은 환경에서는 `vars-common.yaml`에서 다음 값을
+설정한다. 개인키와 같은 이름의 `.pub` 공개키가 있어야 하며, 비밀번호는 파일에
+저장하지 않고 `ssh-copy-id`가 실행 중 터미널에서 직접 요청한다.
 
-1. `inventory.lst`의 `ansible_host`
-2. `vars-common.yml`의 `lab_hosts`, `headscale_ip`, `tailscale_router_sites`
+```yaml
+ssh_copy_id_enabled: true
+ssh_copy_id_identity_file: /root/.ssh/id_rsa
+ssh_copy_id_public_key_file: "{{ ssh_copy_id_identity_file }}.pub"
+```
+
+첫 Play는 제어 노드에서 각 inventory 호스트의 키 로그인을 먼저 확인한다. 이미
+접속 가능한 호스트는 건너뛰고, 접속할 수 없는 호스트에만 `ssh-copy-id`를 실행한
+후 원격 Role을 시작한다. 초기 키 배포가 끝난 뒤에는 다음 실행부터
+`ssh_copy_id_enabled: false`로 되돌려도 된다.
+
+실제 환경에 맞게 `inventory.lst`를 수정한다. 호스트명은 inventory의 호스트 이름으로,
+관리 IP는 `ansible_host`로 지정한다. `host_alias`, `site_nic`, `site_cidr`, 인증서
+SAN처럼 호스트마다 다른 값도 해당 호스트 행에 지정한다.
+
+```ini
+[headscale]
+my-head.example.com ansible_host=192.168.156.100 host_alias=head cert_dns_sans='["my-head.example.com", "head"]' cert_ip_sans='["192.168.156.100"]'
+
+[tailscale_routers]
+site-a.example.com ansible_host=192.168.156.101 host_alias=site-a site_nic=ens224 site_cidr=10.10.10.0/24
+site-b.example.com ansible_host=192.168.156.102 host_alias=site-b site_nic=ens224 site_cidr=10.10.20.0/24
+```
 
 NIC 주소 자체는 이미 구성된 상태를 전제로 하며 이 플레이북이 NetworkManager
 연결 프로파일을 변경하지 않는다. `site_nic`은 각 Site LAN NIC 이름,
 `site_cidr`은 해당 라우터가 광고할 LAN 대역이다.
+
+Firewalld와 SELinux 관련 설정은 기본적으로 적용하지 않는다. 대상 환경에서 해당
+기능을 사용할 때만 `vars-common.yaml`에서 활성화한다.
+
+```yaml
+common_manage_firewalld: true
+common_manage_selinux: true
+```
+
+`common_manage_firewalld: false`이면 firewalld 패키지 설치, 서비스 시작, 포트 및
+zone 변경을 모두 건너뛴다. 기존 firewalld를 중지하거나 제거하지는 않는다.
+`common_manage_selinux: false`이면 Headscale 파일의 SELinux context 복원을
+건너뛰며, SELinux 자체의 enforcing/permissive/disabled 상태는 변경하지 않는다.
+
+Site-to-Site TCP의 터널 MTU 문제를 예방하기 위한 MSS Clamping은 Firewalld와
+독립적으로 기본 적용한다.
+
+```yaml
+tailscale_manage_mss_clamping: true
+tailscale_interface: tailscale0
+```
+
+라우터의 mangle/FORWARD 체인에 `tailscale0` 출력 및 입력 방향 TCP SYN 규칙을
+각각 하나씩 유지하며, `tailscale-mss-clamping.service`로 재부팅 후에도 적용한다.
+특수한 환경에서 외부 방화벽 관리 도구가 같은 규칙을 전담할 때만
+`tailscale_manage_mss_clamping: false`로 비활성화한다.
 
 ## 실행
 
@@ -41,6 +91,36 @@ SSH 키를 지정하는 등 일반 `ansible-playbook` 옵션을 그대로 전달
 ./run.sh --private-key ~/.ssh/id_ed25519
 ./run.sh --limit tailscale-head
 ./run.sh --check --diff
+```
+
+Role 또는 단계별 단독 실행은 태그를 사용한다.
+
+```bash
+./run.sh --tags ssh_bootstrap
+./run.sh --tags common
+./run.sh --tags headscale
+./run.sh --tags tailscale_router
+./run.sh --tags route_approval
+```
+
+비활성화된 SSH Bootstrap을 일회성으로 실행하려면 vars 파일을 수정하지 않고도
+추가 변수로 활성화할 수 있다.
+
+```bash
+./run.sh --tags ssh_bootstrap -e ssh_copy_id_enabled=true
+```
+
+호스트까지 제한하려면 `--limit`을 함께 사용한다.
+
+```bash
+./run.sh --tags tailscale_router --limit tailscale-01 -vv
+```
+
+태그와 실행 task 목록은 다음 명령으로 확인할 수 있다.
+
+```bash
+./run.sh --list-tags
+./run.sh --tags headscale --list-tasks
 ```
 
 최초 전체 구성에서는 `--limit`을 사용하지 않는다. Headscale 구성, 라우터 등록,
@@ -84,4 +164,3 @@ ansible tailscale_routers -b -m command -a 'sysctl net.ipv4.ip_forward'
 
 최종 데이터 경로는 각 Site 테스트 단말에서 상대편 단말로 `ping`, `traceroute`를
 수행하고 두 subnet router의 site NIC와 `tailscale0`에서 `tcpdump`하여 검증한다.
-

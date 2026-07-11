@@ -11,7 +11,7 @@ ST = {{ headscale_ca_dn.state }}
 L = {{ headscale_ca_dn.locality }}
 O = {{ headscale_ca_dn.organization }}
 OU = {{ headscale_ca_dn.organizational_unit }}
-CN = {{ headscale_host }}
+CN = {{ inventory_hostname }}
 
 [ req_ext ]
 subjectAltName = @alt_names
@@ -19,10 +19,9 @@ keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 
 [ alt_names ]
-{% for name in headscale_cert_dns_sans %}
+{% for name in cert_dns_sans %}
 DNS.{{ loop.index }} = {{ name }}
 {% endfor %}
-{% for address in headscale_cert_ip_sans %}
+{% for address in cert_ip_sans %}
 IP.{{ loop.index }} = {{ address }}
 {% endfor %}
-

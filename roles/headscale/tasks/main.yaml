@@ -7,6 +7,15 @@
     home: "{{ headscale_data_dir }}"
     shell: /sbin/nologin
 
+- name: Validate Headscale runtime directory
+  ansible.builtin.assert:
+    that:
+      - headscale_runtime_dir is match('^/run/.+')
+      - not headscale_runtime_directory_name.startswith('/')
+    fail_msg: >-
+      headscale_runtime_dir must be located below /run so systemd can manage
+      it with RuntimeDirectory.
+
 - name: Create Headscale directories
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -20,7 +29,52 @@
     - { path: "{{ headscale_config_dir }}/tls", owner: root, group: "{{ headscale_group }}", mode: "0750" }
     - { path: "{{ headscale_data_dir }}", owner: "{{ headscale_user }}", group: "{{ headscale_group }}", mode: "0750" }
     - { path: "{{ headscale_data_dir }}/cache", owner: "{{ headscale_user }}", group: "{{ headscale_group }}", mode: "0750" }
-    - { path: "{{ headscale_runtime_dir }}", owner: "{{ headscale_user }}", group: "{{ headscale_group }}", mode: "0770" }
+
+- name: Reconcile ownership of existing Headscale state
+  ansible.builtin.file:
+    path: "{{ headscale_data_dir }}"
+    state: directory
+    owner: "{{ headscale_user }}"
+    group: "{{ headscale_group }}"
+    recurse: true
+
+- name: Find existing Headscale private keys
+  ansible.builtin.find:
+    paths: "{{ headscale_data_dir }}"
+    patterns:
+      - noise_private.key
+      - derp_server_private.key
+    file_type: file
+    recurse: false
+  register: headscale_private_keys
+
+- name: Protect existing Headscale private keys
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ headscale_user }}"
+    group: "{{ headscale_group }}"
+    mode: "0600"
+  loop: "{{ headscale_private_keys.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Find existing Headscale SQLite files
+  ansible.builtin.find:
+    paths: "{{ headscale_data_dir }}"
+    patterns: "db.sqlite*"
+    file_type: file
+    recurse: false
+  register: headscale_sqlite_files
+
+- name: Set permissions on existing Headscale SQLite files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ headscale_user }}"
+    group: "{{ headscale_group }}"
+    mode: "0640"
+  loop: "{{ headscale_sqlite_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Download Headscale binary
   ansible.builtin.get_url:
@@ -30,14 +84,7 @@
     group: root
     mode: "0755"
     checksum: "{{ headscale_binary_checksum if headscale_binary_checksum else omit }}"
-  register: headscale_binary
   notify: Restart headscale
-
-- name: Restore binary SELinux context  # noqa no-handler
-  ansible.builtin.command: "restorecon -v {{ headscale_binary_path }}"
-  when: headscale_binary.changed
-  changed_when: true
-  failed_when: false
 
 - name: Render CA OpenSSL configuration
   ansible.builtin.template:
@@ -176,6 +223,18 @@
     - { src: policy.hujson.j2, dest: "{{ headscale_config_dir }}/policy.hujson" }
   notify: Restart headscale
 
+- name: Restore Headscale SELinux contexts
+  ansible.builtin.command:
+    argv:
+      - restorecon
+      - -Rv
+      - "{{ headscale_binary_path }}"
+      - "{{ headscale_config_dir }}"
+      - "{{ headscale_data_dir }}"
+  register: headscale_restorecon
+  when: common_manage_selinux | bool
+  changed_when: headscale_restorecon.stdout | length > 0
+
 - name: Validate Headscale configuration
   ansible.builtin.command:
     argv: ["{{ headscale_binary_path }}", configtest, --config, "{{ headscale_config_dir }}/config.yaml"]
@@ -192,9 +251,14 @@
 
 - name: Check Headscale firewall ports
   ansible.builtin.command: "firewall-cmd --permanent --query-port={{ item }}"
-  loop:
-    - "{{ headscale_listen_port }}/tcp"
-    - "{{ headscale_stun_port }}/udp"
+  loop: "{{ firewall_ports }}"
+  loop_control:
+    label: "{{ item }}"
+  vars:
+    firewall_ports: >-
+      {{ [headscale_listen_port | string + '/tcp',
+          headscale_stun_port | string + '/udp'] +
+         headscale_firewall_additional_ports }}
   when: common_manage_firewalld | bool
   register: headscale_firewall_checks
   changed_when: false
@@ -203,6 +267,8 @@
 - name: Open Headscale firewall ports
   ansible.builtin.command: "firewall-cmd --permanent --add-port={{ item.item }}"
   loop: "{{ headscale_firewall_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
   when:
     - common_manage_firewalld | bool
     - item.rc != 0
@@ -219,14 +285,50 @@
     state: started
     daemon_reload: true
 
-- name: Read Headscale users
-  ansible.builtin.command:
-    argv: ["{{ headscale_binary_path }}", users, list, --output, json]
-  register: headscale_users
-  changed_when: false
+- name: Wait for Headscale API readiness
+  block:
+    - name: Wait for Headscale Unix socket
+      ansible.builtin.wait_for:
+        path: "{{ headscale_unix_socket_path }}"
+        state: present
+        timeout: 30
+
+    - name: Read Headscale users
+      ansible.builtin.command:
+        argv: ["{{ headscale_binary_path }}", users, list, --output, json]
+      register: headscale_users
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: headscale_users.rc == 0
+  rescue:
+    - name: Read Headscale service status after readiness failure
+      ansible.builtin.command:
+        argv: [systemctl, status, headscale, --no-pager, --full]
+      register: headscale_service_status
+      changed_when: false
+      failed_when: false
+
+    - name: Read Headscale journal after readiness failure
+      ansible.builtin.command:
+        argv: [journalctl, --unit, headscale, --lines, "80", --no-pager]
+      register: headscale_service_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Report Headscale readiness failure
+      ansible.builtin.fail:
+        msg: |-
+          Headscale did not become ready through {{ headscale_unix_socket_path }}.
+
+          systemctl status:
+          {{ headscale_service_status.stdout | default('No status output') }}
+
+          journalctl:
+          {{ headscale_service_journal.stdout | default('No journal output') }}
 
 - name: Create Headscale user
   ansible.builtin.command:
-    argv: ["{{ headscale_binary_path }}", users, create, "{{ headscale_namespace }}"]
-  when: headscale_namespace not in (headscale_users.stdout | from_json | map(attribute='name') | list)
+    argv: ["{{ headscale_binary_path }}", users, create, "{{ headscale_user_name }}"]
+  when: headscale_user_name not in (headscale_users.stdout | from_json | map(attribute='name') | list)
   changed_when: true

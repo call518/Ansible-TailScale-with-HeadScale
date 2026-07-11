@@ -1,0 +1,130 @@
+---
+# 접속/공통 OS 설정
+ssh_copy_id_enabled: true
+ssh_copy_id_identity_file: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/id_rsa"
+ssh_copy_id_public_key_file: "{{ ssh_copy_id_identity_file }}.pub"
+ssh_copy_id_connect_timeout: 10
+ssh_copy_id_strict_host_key_checking: accept-new
+
+common_timezone: Asia/Seoul
+common_ntp_servers:
+  - 1.kr.pool.ntp.org
+  - 0.asia.pool.ntp.org
+  - 1.asia.pool.ntp.org
+  - 2.asia.pool.ntp.org
+  - 3.asia.pool.ntp.org
+common_packages:
+  - curl
+  - wget
+  - jq
+  - openssl
+  - tar
+  - iproute
+  - iputils
+  - bind-utils
+  - tcpdump
+  - traceroute
+  - nmap-ncat
+common_manage_firewalld: false
+common_manage_selinux: false
+
+# Headscale
+headscale_version: "0.29.1"
+headscale_arch: amd64
+headscale_binary_path: /usr/local/bin/headscale
+headscale_config_dir: /etc/headscale
+headscale_data_dir: /var/lib/headscale
+headscale_runtime_dir: /run/headscale
+headscale_runtime_directory_name: "{{ headscale_runtime_dir | regex_replace('^/run/', '') }}"
+headscale_pki_dir: /root/headscale-pki
+headscale_user: headscale
+headscale_group: headscale
+headscale_user_name: site2site
+headscale_listen_address: 0.0.0.0
+headscale_listen_port: 443
+headscale_url: "https://{{ groups['headscale'][0] }}:{{ headscale_listen_port }}"
+headscale_metrics_listen_address: 127.0.0.1
+headscale_metrics_listen_port: 9091
+headscale_grpc_listen_address: 127.0.0.1
+headscale_grpc_listen_port: 50443
+headscale_grpc_allow_insecure: false
+headscale_trusted_proxies: []
+headscale_noise_private_key_path: "{{ headscale_data_dir }}/noise_private.key"
+headscale_stun_port: 3478
+headscale_stun_listen_address: 0.0.0.0
+headscale_derp_enabled: true
+headscale_derp_region_id: 999
+headscale_derp_region_code: headscale
+headscale_derp_region_name: Headscale Embedded DERP
+headscale_derp_verify_clients: true
+headscale_derp_private_key_path: "{{ headscale_data_dir }}/derp_server_private.key"
+headscale_derp_auto_add_region: true
+headscale_derp_ipv4: "{{ hostvars[groups['headscale'][0]].ansible_host }}"
+headscale_derp_ipv6: ""
+headscale_derp_urls: []
+headscale_derp_paths: []
+headscale_derp_auto_update_enabled: false
+headscale_derp_update_frequency: 3h
+headscale_tailnet_v4_prefix: 100.64.0.0/10
+headscale_tailnet_v6_prefix: fd7a:115c:a1e0::/48
+headscale_ip_allocation: sequential
+headscale_disable_check_updates: true
+headscale_node_expiry: 0
+headscale_ephemeral_inactivity_timeout: 30m
+headscale_route_probe_interval: 10s
+headscale_route_probe_timeout: 5s
+headscale_database_type: sqlite
+headscale_database_debug: false
+headscale_database_prepare_stmt: true
+headscale_database_parameterized_queries: true
+headscale_database_skip_not_found: true
+headscale_database_slow_threshold: 1000
+headscale_database_path: "{{ headscale_data_dir }}/db.sqlite"
+headscale_database_write_ahead_log: true
+headscale_database_wal_autocheckpoint: 1000
+headscale_letsencrypt_hostname: ""
+headscale_letsencrypt_cache_dir: "{{ headscale_data_dir }}/cache"
+headscale_letsencrypt_challenge_type: HTTP-01
+headscale_letsencrypt_listen: ":http"
+headscale_tls_cert_path: "{{ headscale_config_dir }}/tls/server.crt"
+headscale_tls_key_path: "{{ headscale_config_dir }}/tls/server.key"
+headscale_log_level: info
+headscale_log_format: text
+headscale_policy_mode: file
+headscale_policy_path: "{{ headscale_config_dir }}/policy.hujson"
+headscale_magic_dns: true
+headscale_dns_domain: tailnet.internal
+headscale_override_local_dns: false
+headscale_dns_global_nameservers: []
+headscale_dns_split_nameservers: {}
+headscale_dns_search_domains: []
+headscale_dns_extra_records: []
+headscale_unix_socket_path: "{{ headscale_runtime_dir }}/headscale.sock"
+headscale_unix_socket_permission: "0770"
+headscale_logtail_enabled: false
+headscale_taildrop_enabled: true
+headscale_auto_update_enabled: false
+headscale_firewall_additional_ports: []  # 예: ["9091/tcp", "50443/tcp"]
+headscale_binary_checksum: ""  # 운영에서는 sha256:<공식 체크섬> 권장
+
+# 내부 CA/TLS. 값 변경 시 인증서를 다시 생성하고 전 노드 trust store에 반영한다.
+headscale_ca_days: 36500
+headscale_cert_days: 18250
+headscale_ca_dn:
+  country: KR
+  state: Seoul
+  locality: Hongdae
+  organization: Headscale-Lab
+  organizational_unit: Infrastructure
+  common_name: Headscale Lab Root CA
+# Tailscale subnet router
+tailscale_repo_url: https://pkgs.tailscale.com/stable/rhel/9/tailscale.repo
+tailscale_repo_path: /etc/yum.repos.d/tailscale.repo
+tailscale_package: tailscale
+tailscale_udp_port: 41641
+tailscale_accept_routes: true
+tailscale_accept_dns: false
+tailscale_snat_subnet_routes: false
+tailscale_manage_ipv6_forwarding: true
+tailscale_manage_mss_clamping: true
+tailscale_interface: tailscale0

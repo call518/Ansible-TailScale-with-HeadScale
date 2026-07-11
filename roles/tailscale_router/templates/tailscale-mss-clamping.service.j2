@@ -1,0 +1,15 @@
+[Unit]
+Description=Clamp TCP MSS for Tailscale site-to-site forwarding
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Requires=tailscaled.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/tailscale-mss-clamping apply
+ExecReload=/usr/local/sbin/tailscale-mss-clamping apply
+ExecStop=/usr/local/sbin/tailscale-mss-clamping remove
+
+[Install]
+WantedBy=multi-user.target
