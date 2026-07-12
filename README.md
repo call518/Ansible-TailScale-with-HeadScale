@@ -137,9 +137,9 @@ The control node must be able to connect to every managed node over SSH and use
 different account or SSH key, adjust `ansible_user`, `ansible_port`, and any
 required connection variables in `inventory.ini`. On environments such as
 Ubuntu images that do not allow root SSH login by default, set the actual SSH
-account, such as `ansible_user=ubuntu`, on each host. `[all:vars]` explicitly
-uses `sudo` to become root, and host variables take precedence over these
-common connection variables. Keeping `ansible_user=root` works normally even
+account, such as `ansible_user=ubuntu`, on each host line. A host-line value
+overrides the default `ansible_user=root` in `[all:vars]`, which explicitly
+uses `sudo` to become root. Keeping `ansible_user=root` works normally even
 with the privilege-escalation settings present.
 
 Use one of these three sudo authentication methods for a non-root SSH account:
@@ -168,15 +168,41 @@ ssh_copy_id_identity_file: /root/.ssh/id_rsa
 ssh_copy_id_public_key_file: "{{ ssh_copy_id_identity_file }}.pub"
 ```
 
-When all targets share the same initial SSH password, store the following
-variable in the encrypted `vars-vault.yaml`. The value below is only a
-placeholder; never create a plaintext vars file or commit the real password.
+When all targets share the same initial SSH password, store the common variable
+in encrypted `vars-vault.yaml`. The value below is only a placeholder; never
+create a plaintext vars file or commit the real password.
 
 ```yaml
 vault_ssh_root_password: "common-initial-SSH-password"
 # Add only when a non-root SSH account requires a sudo password
 vault_ansible_become_password: "sudo-password"
 ```
+
+When targets use different SSH passwords, use a map keyed by inventory
+hostname instead:
+
+```yaml
+vault_ssh_passwords:
+  tailscale-head: "HEAD-SSH-password"
+  tailscale-01: "SITE01-SSH-password"
+  tailscale-02: "SITE02-SSH-password"
+  tailscale-03: "SITE03-SSH-password"
+  tailscale-04: "SITE04-SSH-password"
+```
+
+When both the common variable and map are defined, map entries take precedence,
+so only exceptional hosts need overrides:
+
+```yaml
+vault_ssh_root_password: "common-password-for-most-hosts"
+vault_ssh_passwords:
+  tailscale-04: "TAILSCALE04-exception-password"
+```
+
+Map keys must exactly match hostnames in `inventory.ini`. A key outside the
+`tailscale` group is treated as a typo and stops deployment. Each host selects
+its password in this order: `vault_ssh_passwords[hostname]`,
+`vault_ssh_root_password`, then interactive input.
 
 `vars-vault.yaml` is an optional file that is not supplied by the repository
 and is ignored by Git. Create it only to automate password entry. The default
@@ -205,9 +231,9 @@ set only the password-file path in the environment:
 ANSIBLE_VAULT_PASSWORD_FILE=/secure/path/vault-pass ./run.sh
 ```
 
-When `vars-vault.yaml` defines `vault_ssh_root_password`, the first Play uses
-`sshpass -e ssh-copy-id` for non-interactive key deployment and protects the
-password task with `no_log`. Without the Vault file or that variable, ordinary
+When `vars-vault.yaml` supplies a host-map or common SSH password, the first
+Play runs `sshpass -e ssh-copy-id` with the value selected for each node and
+protects the password task with `no_log`. Without a Vault value for that host, ordinary
 `ssh-copy-id` prompts for each target's SSH password in the terminal. With
 `ssh_copy_id_enabled: false`, the complete deployment uses the existing SSH key
 without requiring Vault. If the same key already exists in remote
@@ -215,8 +241,8 @@ without requiring Vault. If the same key already exists in remote
 built into `ssh-copy-id` prevents duplication. Password authentication adds
 the key only when it is different or missing. After initial deployment,
 `ssh_copy_id_enabled` can be returned to `false`. Do not use the common-password
-method when targets have different passwords or prohibit root password login;
-use host-specific vaulted variables or an existing SSH key instead.
+method when targets prohibit root password login; use the actual SSH account
+with the host-specific Vault map or an existing SSH key instead.
 
 Do not commit either `vars-vault.yaml` or `~/.ansible_vault_pass_tailscale`.
 `run.sh` continues without Vault options when the Vault vars file is absent. It
@@ -232,11 +258,11 @@ also assigned on the corresponding host line.
 
 ```ini
 [headscale]
-my-head.example.com ansible_host=192.168.156.100 host_alias=head cert_dns_sans='["my-head.example.com", "head"]' cert_ip_sans='["192.168.156.100"]'
+my-head.example.com ansible_host=192.168.156.100 ansible_user=ubuntu host_alias=head cert_dns_sans='["my-head.example.com", "head"]' cert_ip_sans='["192.168.156.100"]'
 
 [tailscale_routers]
-site-a.example.com ansible_host=192.168.156.101 host_alias=site-a site_nic=ens224 site_cidr=10.10.10.0/24
-site-b.example.com ansible_host=192.168.156.102 host_alias=site-b site_nic=ens224 site_cidr=10.10.20.0/24
+site-a.example.com ansible_host=192.168.156.101 ansible_user=root host_alias=site-a site_nic=ens224 site_cidr=10.10.10.0/24
+site-b.example.com ansible_host=192.168.156.102 ansible_user=admin host_alias=site-b site_nic=ens224 site_cidr=10.10.20.0/24
 
 [site_test_endpoints]
 site-a.example.com site_test_ip=10.10.10.201
@@ -251,11 +277,13 @@ ansible_become_user=root
 ansible_become_method=sudo
 ```
 
-`[all:vars]` applies `/usr/bin/python3`, the default SSH account and private
-key, and sudo-based root privilege escalation to every managed node. Override
-these values on an individual host line when it uses another account or key.
-`/usr/bin/python3` exists on the supported Rocky Linux 10 and Ubuntu 26.04
-targets.
+`ansible_user=root` in `[all:vars]` is the default SSH account. An
+`ansible_user` on a host line overrides it, so only nodes requiring a non-root
+account need a different value. `[all:vars]` also applies `/usr/bin/python3`,
+the default private key, and sudo-based root privilege escalation to every
+managed node. Override the private key on an individual host line when
+necessary. `/usr/bin/python3` exists on the supported Rocky Linux 10 and Ubuntu
+26.04 targets.
 
 NIC addresses are expected to be configured already; this playbook does not
 modify NetworkManager connection profiles. `site_nic` is the Site LAN NIC name

@@ -131,8 +131,9 @@ flowchart TB
 기본값은 `root` 접속이다. 다른 계정이나 SSH 키를 쓰면 `inventory.ini`의
 `ansible_user`, `ansible_port` 및 필요한 접속 변수를 조정한다.
 Ubuntu 설치 이미지처럼 root SSH 로그인을 기본 허용하지 않는 환경에서는 각 호스트에
-`ansible_user=ubuntu`처럼 실제 SSH 계정을 지정한다. `[all:vars]`는 `sudo`를 통해
-root로 권한을 상승하도록 명시하며, 호스트 변수는 이 공통 접속 변수보다 우선한다.
+`ansible_user=ubuntu`처럼 각 호스트 행에 실제 SSH 계정을 지정한다. 호스트 행의 값은
+`[all:vars]`의 기본 `ansible_user=root`보다 우선한다. `[all:vars]`는 `sudo`를 통해
+root로 권한을 상승하도록 명시한다.
 `ansible_user=root`이면 권한 상승 설정이 있어도 기존 배포 흐름에 문제가 없다.
 
 비-root SSH 계정의 sudo 인증은 환경에 따라 다음 세 방식 중 하나를 사용한다.
@@ -157,15 +158,38 @@ ssh_copy_id_identity_file: /root/.ssh/id_rsa
 ssh_copy_id_public_key_file: "{{ ssh_copy_id_identity_file }}.pub"
 ```
 
-모든 대상의 초기 SSH 비밀번호가 같다는 전제에서 암호화된 `vars-vault.yaml`에
-다음 변수를 저장한다. 아래 값은 예시이며 평문 파일을 만들거나 실제 비밀번호를
-Git에 기록하면 안 된다.
+모든 대상의 초기 SSH 비밀번호가 같으면 암호화된 `vars-vault.yaml`에 공통 변수를
+저장한다. 아래 값은 예시이며 평문 파일을 만들거나 실제 비밀번호를 Git에 기록하면
+안 된다.
 
 ```yaml
 vault_ssh_root_password: "초기-공통-SSH-비밀번호"
 # 비-root SSH 계정이 sudo 비밀번호를 요구할 때만 추가
 vault_ansible_become_password: "sudo-비밀번호"
 ```
+
+대상별 SSH 비밀번호가 다르면 inventory 호스트명을 키로 하는 Map을 대신 사용한다.
+
+```yaml
+vault_ssh_passwords:
+  tailscale-head: "HEAD-SSH-비밀번호"
+  tailscale-01: "SITE01-SSH-비밀번호"
+  tailscale-02: "SITE02-SSH-비밀번호"
+  tailscale-03: "SITE03-SSH-비밀번호"
+  tailscale-04: "SITE04-SSH-비밀번호"
+```
+
+공통 변수와 Map을 함께 정의하면 Map 값이 우선하므로 예외 노드만 덮어쓸 수 있다.
+
+```yaml
+vault_ssh_root_password: "대부분-노드의-공통-비밀번호"
+vault_ssh_passwords:
+  tailscale-04: "TAILSCALE04-예외-비밀번호"
+```
+
+Map 키는 `inventory.ini`의 호스트명과 정확히 같아야 하며, `tailscale` 그룹에 없는
+키가 있으면 오타로 간주해 배포를 중단한다. 각 노드의 선택 순서는
+`vault_ssh_passwords[호스트명]`, `vault_ssh_root_password`, 대화식 입력 순이다.
 
 `vars-vault.yaml`은 저장소에 제공되지 않는 선택 파일이며 `.gitignore` 대상이다.
 비밀번호 입력까지 자동화할 때만 생성한다. Vault 마스터 비밀번호 파일은 기본적으로
@@ -193,16 +217,16 @@ ansible-vault edit \
 ANSIBLE_VAULT_PASSWORD_FILE=/secure/path/vault-pass ./run.sh
 ```
 
-`vars-vault.yaml`에 `vault_ssh_root_password`가 있으면 첫 Play가
-`sshpass -e ssh-copy-id`로 공개키를 비대화식 배포하고 비밀번호 관련 task를 `no_log`
-처리한다. Vault 파일이나 해당 변수가 없으면 일반 `ssh-copy-id`가 대상별 SSH
+`vars-vault.yaml`에 호스트별 Map 또는 공통 SSH 비밀번호가 있으면 첫 Play가 각
+노드에 맞는 값으로 `sshpass -e ssh-copy-id`를 실행하고 비밀번호 관련 task를
+`no_log` 처리한다. 해당 노드에 사용할 Vault 값이 없으면 일반 `ssh-copy-id`가 대상별 SSH
 비밀번호를 터미널에서 요청한다. `ssh_copy_id_enabled: false`이면 Vault 없이 기존
 SSH 키로 전체 배포를 실행한다. 원격
 `authorized_keys`에 동일한 공개키가 이미 있으면 `ssh-copy-id` 자체 검사로 중복
 추가하지 않으며, 지정 키가 바뀌었거나 없을 때만 비밀번호 인증 후 추가한다. 초기
 키 배포가 끝난 뒤에는 다음 실행부터 `ssh_copy_id_enabled: false`로 되돌려도 된다.
-대상별 비밀번호가 서로 다르거나 root 비밀번호 로그인이 금지된 환경에는 이 공통
-비밀번호 방식을 사용하지 말고 호스트별 Vault 변수 또는 기존 SSH 키를 사용한다.
+root 비밀번호 로그인이 금지된 환경에는 실제 SSH 계정과 호스트별 Vault Map 또는 기존
+SSH 키를 사용한다.
 
 `vars-vault.yaml`과 `~/.ansible_vault_pass_tailscale`은 모두 커밋하지 않는다.
 `run.sh`는 Vault 파일이 없으면 Vault 옵션 없이 계속하며, Vault 파일은 있는데 마스터
@@ -217,11 +241,11 @@ SAN처럼 호스트마다 다른 값도 해당 호스트 행에 지정한다.
 
 ```ini
 [headscale]
-my-head.example.com ansible_host=192.168.156.100 host_alias=head cert_dns_sans='["my-head.example.com", "head"]' cert_ip_sans='["192.168.156.100"]'
+my-head.example.com ansible_host=192.168.156.100 ansible_user=ubuntu host_alias=head cert_dns_sans='["my-head.example.com", "head"]' cert_ip_sans='["192.168.156.100"]'
 
 [tailscale_routers]
-site-a.example.com ansible_host=192.168.156.101 host_alias=site-a site_nic=ens224 site_cidr=10.10.10.0/24
-site-b.example.com ansible_host=192.168.156.102 host_alias=site-b site_nic=ens224 site_cidr=10.10.20.0/24
+site-a.example.com ansible_host=192.168.156.101 ansible_user=root host_alias=site-a site_nic=ens224 site_cidr=10.10.10.0/24
+site-b.example.com ansible_host=192.168.156.102 ansible_user=admin host_alias=site-b site_nic=ens224 site_cidr=10.10.20.0/24
 
 [site_test_endpoints]
 site-a.example.com site_test_ip=10.10.10.201
@@ -236,10 +260,11 @@ ansible_become_user=root
 ansible_become_method=sudo
 ```
 
-`[all:vars]`는 모든 관리 대상에 `/usr/bin/python3`, 기본 SSH 계정과 개인키 및
-`sudo` 기반 root 권한 상승을 공통 적용한다. 다른 계정이나 키를 사용하는 호스트는
-해당 호스트 행에서 값을 재정의한다. 지원 대상인 Rocky Linux 10과 Ubuntu 26.04에는
-`/usr/bin/python3`가 존재한다.
+`[all:vars]`의 `ansible_user=root`는 기본 SSH 계정이다. 각 호스트 행의
+`ansible_user`가 이를 덮어쓰므로 비-root 계정이 필요한 노드만 변경하면 된다.
+`[all:vars]`는 `/usr/bin/python3`, 기본 개인키 및 `sudo` 기반 root 권한 상승도 공통
+적용한다. 다른 키를 사용하는 호스트는 해당 호스트 행에서 개인키도 재정의한다. 지원
+대상인 Rocky Linux 10과 Ubuntu 26.04에는 `/usr/bin/python3`가 존재한다.
 
 NIC 주소 자체는 이미 구성된 상태를 전제로 하며 이 플레이북이 NetworkManager
 연결 프로파일을 변경하지 않는다. `site_nic`은 각 Site LAN NIC 이름,
