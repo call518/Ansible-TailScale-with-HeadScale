@@ -111,19 +111,24 @@ flowchart TB
 
 ## 파일 구조
 
-- `vars-common.yaml`: 모든 노드에 공통인 버전, 경로, 인증서 DN, 포트 및 동작 변수
-- `vars-vault.yaml`: SSH Bootstrap 및 선택적 sudo 비밀번호 Vault 파일(Git 제외)
-- `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml`: OS 계열별 패키지, 서비스, CA trust 및 Tailscale 저장소 변수
-- `inventory.ini`: Ansible 접속 대상과 관리 IP
-- `roles/ssh_bootstrap`: Vault 인증과 Ansible 내장 모듈을 사용하는 병렬 SSH 키 초기 배포
-- `roles/os_compat`: 지원 OS/아키텍처 검증 및 OS별 변수 로드
-- `roles/common`: 공통 OS, 시간 동기화, hosts, 패키지, 선택적 firewalld
-- `roles/headscale`: CA/TLS, Headscale binary/config/policy/systemd/user
-- `roles/headplane`: Docker CE와 Headplane 관리 UI(Limited Mode)
-- `roles/tailscale_router`: CA trust, Tailscale, forwarding, MSS Clamping, 노드 등록
-- `roles/site_test_endpoint`: 선택적 netns 가상 단말 생성 및 Site 간 ping 검증
-- `pb-tailscale-with-headscale.yaml`: 전체 실행 순서와 subnet route 승인
-- `run.sh`: 플레이북 실행 진입점
+| 파일/Role | 역할 |
+|---|---|
+| `pb-tailscale-with-headscale.yaml` | Host scope, privilege, 실행 순서와 조건을 정의하고 Role을 호출하는 최상위 Playbook |
+| `run.sh` | Vault password 파일을 선택하고 사용자 인자를 Playbook에 전달하는 실행 진입점 |
+| `ansible.cfg` | Inventory, forks, SSH host-key 확인 등 Ansible 실행 기본값 |
+| `inventory.ini` | Headscale/Router 그룹, 관리 IP, SSH 계정, Site NIC/CIDR와 netns 시험 주소 |
+| `vars-common.yaml` | 버전, 경로, 포트와 공통 동작 변수 |
+| `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml` | OS별 package, service, CA trust와 Tailscale repository 변수 |
+| `vars-vault.yaml` | SSH Bootstrap 및 선택적 sudo 비밀번호 Vault 파일; 사용자가 생성하며 Git에서 제외 |
+| `VARIABLES.ko.md`, `VARIABLES.md` | 모든 vars 파일의 변수별 상세 참조 |
+| `roles/ssh_bootstrap` | Controller 입력 검증, Vault 비밀번호 기반 병렬 SSH 키 배포, 전체 결과 gate |
+| `roles/os_compat` | 지원 OS/아키텍처 검증 및 OS별 변수 로드 |
+| `roles/common` | Hostname, 시간 동기화, hosts, 공통 package와 선택적 firewalld 설정 |
+| `roles/headscale` | 내부 CA/TLS, Headscale binary, config, policy seed, systemd와 사용자 구성 |
+| `roles/headplane` | Docker CE와 Headplane 관리 UI를 Limited Mode로 선택 배포 |
+| `roles/tailscale_router` | CA trust, Tailscale 설치·등록, forwarding과 MSS Clamping 구성 |
+| `roles/router_mgmt` | 등록 Router 검증, DB policy tagOwner 병합·JSON 정규화, node tag와 subnet route 승인 |
+| `roles/site_test_endpoint` | 실제 Site 구조의 임시 netns/veth 단말 생성과 Site 간 ping 검증 |
 
 ## 실행 전 준비
 
@@ -552,8 +557,8 @@ Router 태그를 할당하기 전에 현재 policy를 읽고,
 않는다.
 
 병합이 활성화된 database 모드에서는 전체 policy의 JSON 표현도 일관되게 정규화한다.
-단순 값 배열은 `["*"]`처럼 한 줄로 유지하고 객체 배열은 여러 줄로 들여쓴다. 현재
-DB policy와 정규화 결과의 내용 또는 형식이 다를 때만 검증 후 다시 저장한다.
+단순 값 배열은 한 줄로 유지하고 객체 배열은 여러 줄로 들여쓴다. 현재 DB policy와
+정규화 결과의 내용 또는 형식이 다를 때만 검증 후 다시 저장한다.
 
 File 모드로 영구 전환하려면 vars를 바꾸고 Headscale role을 실행한다.
 

@@ -1,0 +1,73 @@
+---
+- name: Initialize SSH bootstrap failure list
+  ansible.builtin.set_fact:
+    ssh_bootstrap_failures: []
+  when: ssh_bootstrap_enabled | bool
+
+- name: Collect failed SSH bootstrap hosts
+  ansible.builtin.set_fact:
+    ssh_bootstrap_failures: >-
+      {{ ssh_bootstrap_failures +
+         [{'host': item,
+           'address': hostvars[item].ansible_host,
+           'stage': host_result.stage,
+           'message': host_result.message}] }}
+  vars:
+    host_result: >-
+      {{ hostvars[item].ssh_bootstrap_result |
+         default({'succeeded': false,
+                  'stage': 'missing_result',
+                  'message': 'No bootstrap result was recorded'}) }}
+  loop: "{{ groups['tailscale'] }}"
+  loop_control:
+    label: "{{ item }} ({{ hostvars[item].ansible_host }})"
+  when:
+    - ssh_bootstrap_enabled | bool
+    - not (host_result.succeeded | bool)
+
+- name: Print SSH bootstrap summary header
+  ansible.builtin.debug:
+    msg: "SSH Bootstrap summary:"
+  when: ssh_bootstrap_enabled | bool
+
+- name: Report SSH bootstrap status for every host
+  ansible.builtin.debug:
+    msg: >-
+      {{ item }} ({{ hostvars[item].ansible_host }}):
+      {{ '[SUCCEEDED]' if host_result.succeeded else
+         '[FAILED] stage=' ~ host_result.stage ~
+         ' reason=' ~ host_result.message }}
+  vars:
+    host_result: >-
+      {{ hostvars[item].ssh_bootstrap_result |
+         default({'succeeded': false,
+                  'stage': 'missing_result',
+                  'message': 'No bootstrap result was recorded'}) }}
+  loop: "{{ groups['tailscale'] }}"
+  loop_control:
+    label: "{{ item }} ({{ hostvars[item].ansible_host }})"
+  when: ssh_bootstrap_enabled | bool
+
+- name: Print SSH bootstrap summary footer
+  ansible.builtin.debug:
+    msg: >-
+      {% if ssh_bootstrap_failures | length > 0 %}
+      SSH Bootstrap failed on {{ ssh_bootstrap_failures | length }} of
+      {{ groups['tailscale'] | length }} hosts:
+      {{ ssh_bootstrap_failures | map(attribute='host') | join(', ') }}.
+      Subsequent deployment plays were not started.
+      {% else %}
+      SSH Bootstrap succeeded on all {{ groups['tailscale'] | length }} hosts.
+      Subsequent deployment plays may now start.
+      {% endif %}
+  when: ssh_bootstrap_enabled | bool
+
+- name: Stop deployment when any SSH bootstrap failed
+  ansible.builtin.assert:
+    that:
+      - ssh_bootstrap_failures | length == 0
+    fail_msg: >-
+      SSH bootstrap failed on {{ ssh_bootstrap_failures | length }} host(s):
+      {{ ssh_bootstrap_failures | map(attribute='host') | join(', ') }}.
+      Fix all listed hosts and rerun; no deployment play has started.
+  when: ssh_bootstrap_enabled | bool

@@ -1,0 +1,164 @@
+---
+- name: Read registered Headscale nodes
+  ansible.builtin.command:
+    argv: ["{{ headscale_binary_path }}", nodes, list, --output, json]
+  register: registered_headscale_nodes
+  changed_when: false
+
+- name: Validate router registration in Headscale
+  ansible.builtin.assert:
+    that:
+      - >-
+        registered_headscale_nodes.stdout | from_json |
+        selectattr('name', 'equalto', item) | list | length == 1
+    fail_msg: >-
+      Router '{{ item }}' is not uniquely registered in Headscale. Check
+      'headscale nodes list' before approving routes.
+  loop: "{{ groups['tailscale_routers'] }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Resolve router Headscale node IDs
+  ansible.builtin.set_fact:
+    headscale_router_node_ids: >-
+      {{ headscale_router_node_ids | default({}) |
+         combine({item: (registered_headscale_nodes.stdout | from_json |
+                         selectattr('name', 'equalto', item) |
+                         map(attribute='id') | first)}) }}
+  loop: "{{ groups['tailscale_routers'] }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Validate router tag mapping
+  ansible.builtin.assert:
+    that:
+      - item in headscale_router_tags
+    fail_msg: >-
+      No Headscale tag is mapped for router '{{ item }}' in
+      headscale_router_tags.
+  loop: "{{ groups['tailscale_routers'] }}"
+  loop_control:
+    label: "{{ item }}"
+  when: headscale_router_tags_enabled | bool
+
+- name: Reconcile managed tag owners in database policy
+  when:
+    - headscale_router_tags_enabled | bool
+    - headscale_policy_mode == 'database'
+  block:
+    - name: Read current Headscale database policy
+      ansible.builtin.command:
+        argv: ["{{ headscale_binary_path }}", policy, get]
+      register: current_headscale_policy_command
+      changed_when: false
+
+    - name: Parse current Headscale database policy
+      ansible.builtin.set_fact:
+        current_headscale_policy: >-
+          {{ current_headscale_policy_command.stdout | from_json }}
+        reconciled_headscale_policy: >-
+          {{ current_headscale_policy_command.stdout | from_json }}
+
+    - name: Merge required router tag owners
+      ansible.builtin.set_fact:
+        reconciled_headscale_policy: >-
+          {{ reconciled_headscale_policy | combine({
+               'tagOwners':
+                 (reconciled_headscale_policy.tagOwners | default({})) |
+                 combine({
+                   item:
+                     (((reconciled_headscale_policy.tagOwners |
+                        default({}))[item] | default([])) +
+                      [headscale_user_name ~ '@']) | unique | list
+                 })
+             }) }}
+      loop: "{{ headscale_router_tags.values() | unique | list }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Place managed tag owners first in policy output
+      ansible.builtin.set_fact:
+        reconciled_headscale_policy: >-
+          {{ {'tagOwners': reconciled_headscale_policy.tagOwners} |
+             combine(reconciled_headscale_policy) }}
+
+    - name: Write reconciled Headscale policy
+      ansible.builtin.template:
+        src: reconciled-policy.json.j2
+        dest: /run/headscale/ansible-policy.json
+        owner: root
+        group: root
+        mode: "0600"
+      changed_when: false
+
+    - name: Read rendered Headscale policy
+      ansible.builtin.slurp:
+        src: /run/headscale/ansible-policy.json
+      register: rendered_headscale_policy_file
+
+    - name: Determine whether Headscale policy needs reconciliation
+      ansible.builtin.set_fact:
+        headscale_policy_reconciliation_required: >-
+          {{ reconciled_headscale_policy != current_headscale_policy or
+             (rendered_headscale_policy_file.content | b64decode | trim) !=
+             (current_headscale_policy_command.stdout | trim) }}
+
+    - name: Validate reconciled Headscale policy
+      ansible.builtin.command:
+        argv:
+          - "{{ headscale_binary_path }}"
+          - policy
+          - check
+          - --file
+          - /run/headscale/ansible-policy.json
+      when: headscale_policy_reconciliation_required | bool
+      changed_when: false
+
+    - name: Store reconciled Headscale policy
+      ansible.builtin.command:
+        argv:
+          - "{{ headscale_binary_path }}"
+          - policy
+          - set
+          - --file
+          - /run/headscale/ansible-policy.json
+      when: headscale_policy_reconciliation_required | bool
+      changed_when: true
+  always:
+    - name: Remove temporary reconciled policy
+      ansible.builtin.file:
+        path: /run/headscale/ansible-policy.json
+        state: absent
+
+- name: Assign configured tag to each router
+  ansible.builtin.command:
+    argv:
+      - "{{ headscale_binary_path }}"
+      - nodes
+      - tag
+      - -i
+      - "{{ headscale_router_node_ids[item] }}"
+      - -t
+      - "{{ headscale_router_tags[item] }}"
+  loop: "{{ groups['tailscale_routers'] }}"
+  loop_control:
+    label: "{{ item }} -> {{ headscale_router_tags[item] }}"
+  changed_when: true
+  when: headscale_router_tags_enabled | bool
+
+- name: Approve each router's advertised route
+  ansible.builtin.command:
+    argv:
+      - "{{ headscale_binary_path }}"
+      - nodes
+      - approve-routes
+      - --identifier
+      - "{{ headscale_router_node_ids[item] }}"
+      - --routes
+      - "{{ hostvars[item].site_cidr }}"
+  loop: "{{ groups['tailscale_routers'] }}"
+  register: route_approval
+  changed_when: "'already approved' not in (route_approval.stdout | lower)"
+  retries: 6
+  delay: 5
+  until: route_approval.rc == 0

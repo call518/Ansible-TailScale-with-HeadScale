@@ -117,19 +117,24 @@ SSH.
 
 ## Project Structure
 
-- `vars-common.yaml`: versions, paths, certificate DN, ports, and behavior shared by all nodes
-- `vars-vault.yaml`: Vault file for SSH Bootstrap and optional sudo passwords, excluded from Git
-- `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml`: OS-family-specific packages, services, CA trust, and Tailscale repository variables
-- `inventory.ini`: Ansible targets and management IP addresses
-- `roles/ssh_bootstrap`: parallel initial SSH key deployment using Vault authentication and built-in modules
-- `roles/os_compat`: supported OS/architecture validation and OS-specific variable loading
-- `roles/common`: common OS settings, time synchronization, hosts, packages, and optional firewalld
-- `roles/headscale`: CA/TLS, Headscale binary/config/policy/systemd/user
-- `roles/headplane`: Docker CE and the Headplane admin UI in Limited Mode
-- `roles/tailscale_router`: CA trust, Tailscale, forwarding, MSS Clamping, and node registration
-- `roles/site_test_endpoint`: optional netns test endpoint creation and inter-Site ping validation
-- `pb-tailscale-with-headscale.yaml`: complete execution order and subnet route approval
-- `run.sh`: playbook entry point
+| File/Role | Responsibility |
+|---|---|
+| `pb-tailscale-with-headscale.yaml` | Top-level orchestration of host scopes, privileges, ordering, conditions, and Role calls |
+| `run.sh` | Selects the Vault password file and forwards user arguments to the Playbook |
+| `ansible.cfg` | Inventory, forks, SSH host-key checking, and other Ansible defaults |
+| `inventory.ini` | Headscale/router groups, management IPs, SSH users, Site NIC/CIDR, and netns test addresses |
+| `vars-common.yaml` | Shared versions, paths, ports, and behavior settings |
+| `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml` | OS-specific packages, services, CA trust, and Tailscale repositories |
+| `vars-vault.yaml` | User-created, Git-ignored Vault file for SSH Bootstrap and optional sudo passwords |
+| `VARIABLES.md`, `VARIABLES.ko.md` | Detailed reference for every vars-file setting |
+| `roles/ssh_bootstrap` | Controller validation, parallel Vault-password SSH key deployment, and aggregate result gate |
+| `roles/os_compat` | Supported OS/architecture validation and OS-specific variable loading |
+| `roles/common` | Hostname, time sync, hosts, common packages, and optional firewalld settings |
+| `roles/headscale` | Internal CA/TLS, Headscale binary, config, policy seed, systemd, and user setup |
+| `roles/headplane` | Optional Docker CE and Headplane Limited Mode deployment |
+| `roles/tailscale_router` | CA trust, Tailscale installation/registration, forwarding, and MSS Clamping |
+| `roles/router_mgmt` | Router validation, DB policy tagOwner merge/JSON normalization, node tags, and subnet route approval |
+| `roles/site_test_endpoint` | Temporary netns/veth endpoints matching real Site networking and inter-Site ping validation |
 
 ## Before You Run
 
