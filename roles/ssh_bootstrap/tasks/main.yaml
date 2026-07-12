@@ -29,19 +29,24 @@
       - ssh_private_key.stat.isreg
       - ssh_public_key.stat.exists
       - ssh_public_key.stat.isreg
-      - vault_ssh_root_password is defined
-      - vault_ssh_root_password | length > 0
     fail_msg: >-
-      SSH key files or vault_ssh_root_password were not found. Check the SSH
-      key paths in vars-common.yaml and the encrypted variable in
-      vars-vault.yaml.
+      SSH key files were not found. Check ssh_copy_id_identity_file and
+      ssh_copy_id_public_key_file in vars-common.yaml.
+  when: ssh_copy_id_enabled | bool
+
+- name: Select SSH bootstrap authentication mode
+  ansible.builtin.set_fact:
+    ssh_bootstrap_uses_vault: >-
+      {{ vault_ssh_root_password | default('') | length > 0 }}
   when: ssh_copy_id_enabled | bool
 
 - name: Check sshpass command
   ansible.builtin.command:
     argv: [sshpass, -V]
   changed_when: false
-  when: ssh_copy_id_enabled | bool
+  when:
+    - ssh_copy_id_enabled | bool
+    - ssh_bootstrap_uses_vault | bool
 
 - name: Apply selected private key to inventory hosts
   ansible.builtin.set_fact:
@@ -55,26 +60,21 @@
 
 - name: Ensure selected SSH public key is installed on every host
   ansible.builtin.command:
-    argv:
-      - sshpass
-      - -e
-      - ssh-copy-id
-      - -i
-      - "{{ ssh_copy_id_public_key_file }}"
-      - -o
-      - "ConnectTimeout={{ ssh_copy_id_connect_timeout }}"
-      - -o
-      - "StrictHostKeyChecking={{ ssh_copy_id_strict_host_key_checking }}"
-      - -p
-      - "{{ hostvars[item].ansible_port | default(22) | string }}"
-      - "{{ hostvars[item].ansible_user | default('root') }}@{{ hostvars[item].ansible_host }}"
+    argv: >-
+      {{ (["sshpass", "-e"] if (ssh_bootstrap_uses_vault | bool) else []) +
+         ["ssh-copy-id", "-i", ssh_copy_id_public_key_file,
+          "-o", "ConnectTimeout=" ~ (ssh_copy_id_connect_timeout | string),
+          "-o", "StrictHostKeyChecking=" ~ ssh_copy_id_strict_host_key_checking,
+          "-p", hostvars[item].ansible_port | default(22) | string,
+          (hostvars[item].ansible_user | default('root')) ~ "@" ~
+          hostvars[item].ansible_host] }}
   environment:
-    SSHPASS: "{{ vault_ssh_root_password }}"
+    SSHPASS: "{{ vault_ssh_root_password | default('') }}"
   loop: "{{ groups['tailscale'] }}"
   loop_control:
     label: "{{ item }} ({{ hostvars[item].ansible_host }})"
   register: ssh_copy_id_results
-  no_log: true
+  no_log: "{{ ssh_bootstrap_uses_vault | bool }}"
   when: ssh_copy_id_enabled | bool
   changed_when: >-
     'All keys were skipped' not in

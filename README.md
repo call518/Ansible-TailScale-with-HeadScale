@@ -109,7 +109,7 @@ The control node requires the following commands:
 - `ansible-playbook`
 - `ssh`
 - `ssh-copy-id` — when SSH Bootstrap is enabled
-- `sshpass` — for non-interactive SSH Bootstrap with the vaulted password
+- `sshpass` — for non-interactive SSH Bootstrap with the optional vaulted password
 
 Managed nodes must already have NIC and IP configuration and be reachable over
 SSH.
@@ -117,8 +117,8 @@ SSH.
 ## Project Structure
 
 - `vars-common.yaml`: versions, paths, certificate DN, ports, and behavior shared by all nodes
-- `vars-vault.yaml`: user-created Vault file for the common initial SSH password, excluded from Git
-- `vars/os`: OS-family-specific packages, services, CA trust, and Tailscale repository variables
+- `vars-vault.yaml`: optional user-created Vault file for SSH/sudo passwords, excluded from Git
+- `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml`: OS-family-specific packages, services, CA trust, and Tailscale repository variables
 - `inventory.ini`: Ansible targets and management IP addresses
 - `roles/ssh_bootstrap`: optional initial SSH key deployment using `ssh-copy-id`
 - `roles/os_compat`: supported OS/architecture validation and OS-specific variable loading
@@ -178,43 +178,49 @@ vault_ssh_root_password: "common-initial-SSH-password"
 vault_ansible_become_password: "sudo-password"
 ```
 
-`vars-vault.yaml` is not supplied by the repository and is ignored by Git. Each
-user must create it before the first run. The default Vault master password
-file is `~/.ansible_vault_pass`; restrict both files to mode `0600`.
+`vars-vault.yaml` is an optional file that is not supplied by the repository
+and is ignored by Git. Create it only to automate password entry. The default
+Vault master password file is `~/.ansible_vault_pass_tailscale`; restrict both
+files to mode `0600`.
 
 ```bash
 ansible-vault create \
-  --vault-password-file ~/.ansible_vault_pass \
+  --vault-password-file ~/.ansible_vault_pass_tailscale \
   vars-vault.yaml
-chmod 600 vars-vault.yaml ~/.ansible_vault_pass
+chmod 600 vars-vault.yaml ~/.ansible_vault_pass_tailscale
 ```
 
 Use the following command for later changes:
 
 ```bash
 ansible-vault edit \
-  --vault-password-file ~/.ansible_vault_pass \
+  --vault-password-file ~/.ansible_vault_pass_tailscale \
   vars-vault.yaml
 ```
 
-`run.sh` automatically supplies `~/.ansible_vault_pass`. To use another path,
+`run.sh` automatically supplies `~/.ansible_vault_pass_tailscale`. To use another path,
 set only the password-file path in the environment:
 
 ```bash
 ANSIBLE_VAULT_PASSWORD_FILE=/secure/path/vault-pass ./run.sh
 ```
 
-The first Play uses `sshpass -e ssh-copy-id` to deploy the public key to every
-inventory host non-interactively. The task uses `no_log` so the password is not
-printed. If the same key already exists in remote `authorized_keys`, the check
+When `vars-vault.yaml` defines `vault_ssh_root_password`, the first Play uses
+`sshpass -e ssh-copy-id` for non-interactive key deployment and protects the
+password task with `no_log`. Without the Vault file or that variable, ordinary
+`ssh-copy-id` prompts for each target's SSH password in the terminal. With
+`ssh_copy_id_enabled: false`, the complete deployment uses the existing SSH key
+without requiring Vault. If the same key already exists in remote
+`authorized_keys`, the check
 built into `ssh-copy-id` prevents duplication. Password authentication adds
 the key only when it is different or missing. After initial deployment,
 `ssh_copy_id_enabled` can be returned to `false`. Do not use the common-password
 method when targets have different passwords or prohibit root password login;
 use host-specific vaulted variables or an existing SSH key instead.
 
-Do not commit either `vars-vault.yaml` or `~/.ansible_vault_pass`. `run.sh`
-stops with creation guidance if either required file is unavailable. No
+Do not commit either `vars-vault.yaml` or `~/.ansible_vault_pass_tailscale`.
+`run.sh` continues without Vault options when the Vault vars file is absent. It
+stops only when that file exists but its master password file is unreadable. No
 `vars-vault.example.yaml` is provided; this document is the source of truth for
 the required variable structure. If a plaintext password was committed, rotate
 it immediately and remove it from Git history.

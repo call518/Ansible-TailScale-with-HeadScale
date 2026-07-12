@@ -9,7 +9,7 @@
 
 - name: Load operating system variables
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/vars/os/{{ ansible_os_family }}.yaml"
+    file: "{{ playbook_dir }}/vars-OS-{{ ansible_os_family }}.yaml"
 
 - name: Validate supported distribution and architecture
   ansible.builtin.assert:

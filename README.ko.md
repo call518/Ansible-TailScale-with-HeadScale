@@ -105,15 +105,15 @@ flowchart TB
 - `ansible-playbook`
 - `ssh`
 - `ssh-copy-id` — SSH Bootstrap을 사용할 때
-- `sshpass` — Vault 비밀번호로 SSH Bootstrap을 비대화식 실행할 때
+- `sshpass` — 선택적 Vault 비밀번호로 SSH Bootstrap을 비대화식 실행할 때
 
 관리 대상 노드는 초기 NIC/IP 구성이 끝나 있고 SSH 접속이 가능해야 한다.
 
 ## 파일 구조
 
 - `vars-common.yaml`: 모든 노드에 공통인 버전, 경로, 인증서 DN, 포트 및 동작 변수
-- `vars-vault.yaml`: 사용자가 생성하는 공통 초기 SSH 비밀번호 Vault 파일(Git 제외)
-- `vars/os`: OS 계열별 패키지, 서비스, CA trust 및 Tailscale 저장소 변수
+- `vars-vault.yaml`: 선택적으로 생성하는 SSH/sudo 비밀번호 Vault 파일(Git 제외)
+- `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml`: OS 계열별 패키지, 서비스, CA trust 및 Tailscale 저장소 변수
 - `inventory.ini`: Ansible 접속 대상과 관리 IP
 - `roles/ssh_bootstrap`: 선택적 `ssh-copy-id` 기반 SSH 키 초기 배포
 - `roles/os_compat`: 지원 OS/아키텍처 검증 및 OS별 변수 로드
@@ -167,42 +167,46 @@ vault_ssh_root_password: "초기-공통-SSH-비밀번호"
 vault_ansible_become_password: "sudo-비밀번호"
 ```
 
-`vars-vault.yaml`은 저장소에 제공되지 않으며 `.gitignore` 대상이다. 최초 실행 전에
-사용자가 반드시 생성해야 한다. Vault 마스터 비밀번호 파일은 기본적으로
-`~/.ansible_vault_pass`이며 두 파일의 권한을 `0600`으로 제한한다.
+`vars-vault.yaml`은 저장소에 제공되지 않는 선택 파일이며 `.gitignore` 대상이다.
+비밀번호 입력까지 자동화할 때만 생성한다. Vault 마스터 비밀번호 파일은 기본적으로
+`~/.ansible_vault_pass_tailscale`이며 두 파일의 권한을 `0600`으로 제한한다.
 
 ```bash
 ansible-vault create \
-  --vault-password-file ~/.ansible_vault_pass \
+  --vault-password-file ~/.ansible_vault_pass_tailscale \
   vars-vault.yaml
-chmod 600 vars-vault.yaml ~/.ansible_vault_pass
+chmod 600 vars-vault.yaml ~/.ansible_vault_pass_tailscale
 ```
 
 수정할 때는 다음 명령을 사용한다.
 
 ```bash
 ansible-vault edit \
-  --vault-password-file ~/.ansible_vault_pass \
+  --vault-password-file ~/.ansible_vault_pass_tailscale \
   vars-vault.yaml
 ```
 
-`run.sh`는 `~/.ansible_vault_pass`를 자동으로 전달한다. 다른 경로는 비밀값이 아닌
+`run.sh`는 `~/.ansible_vault_pass_tailscale`을 자동으로 전달한다. 다른 경로는 비밀값이 아닌
 파일 경로만 환경변수로 지정한다.
 
 ```bash
 ANSIBLE_VAULT_PASSWORD_FILE=/secure/path/vault-pass ./run.sh
 ```
 
-첫 Play는 `sshpass -e ssh-copy-id`를 이용하여 모든 inventory 호스트에 공개키를
-비대화식으로 배포한다. 비밀번호는 task 출력에 노출되지 않도록 `no_log` 처리된다. 원격
+`vars-vault.yaml`에 `vault_ssh_root_password`가 있으면 첫 Play가
+`sshpass -e ssh-copy-id`로 공개키를 비대화식 배포하고 비밀번호 관련 task를 `no_log`
+처리한다. Vault 파일이나 해당 변수가 없으면 일반 `ssh-copy-id`가 대상별 SSH
+비밀번호를 터미널에서 요청한다. `ssh_copy_id_enabled: false`이면 Vault 없이 기존
+SSH 키로 전체 배포를 실행한다. 원격
 `authorized_keys`에 동일한 공개키가 이미 있으면 `ssh-copy-id` 자체 검사로 중복
 추가하지 않으며, 지정 키가 바뀌었거나 없을 때만 비밀번호 인증 후 추가한다. 초기
 키 배포가 끝난 뒤에는 다음 실행부터 `ssh_copy_id_enabled: false`로 되돌려도 된다.
 대상별 비밀번호가 서로 다르거나 root 비밀번호 로그인이 금지된 환경에는 이 공통
 비밀번호 방식을 사용하지 말고 호스트별 Vault 변수 또는 기존 SSH 키를 사용한다.
 
-`vars-vault.yaml`과 `~/.ansible_vault_pass`는 모두 커밋하지 않는다. `run.sh`는
-두 파일 중 하나라도 없으면 생성 방법을 표시하고 중단한다. 평문 비밀번호가
+`vars-vault.yaml`과 `~/.ansible_vault_pass_tailscale`은 모두 커밋하지 않는다.
+`run.sh`는 Vault 파일이 없으면 Vault 옵션 없이 계속하며, Vault 파일은 있는데 마스터
+비밀번호 파일을 읽을 수 없을 때만 안전하게 중단한다. 평문 비밀번호가
 커밋됐다면 즉시 비밀번호를 교체하고 Git 이력에서도 제거해야 한다. 별도의
 `vars-vault.example.yaml`은 제공하지 않으며 필요한 변수 구조는 이 문서를 기준으로
 한다.
