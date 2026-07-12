@@ -1,0 +1,43 @@
+---
+- name: Explain disabled SSH bootstrap
+  ansible.builtin.debug:
+    msg: >-
+      SSH bootstrap is disabled. Existing SSH key authentication will be used.
+      Set ssh_bootstrap_enabled=true to deploy the selected public key.
+  when: not (ssh_bootstrap_enabled | bool)
+
+- name: Check SSH private key on controller
+  ansible.builtin.stat:
+    path: "{{ ssh_bootstrap_identity_file }}"
+  register: ssh_bootstrap_private_key
+  when: ssh_bootstrap_enabled | bool
+
+- name: Check SSH public key on controller
+  ansible.builtin.stat:
+    path: "{{ ssh_bootstrap_public_key_file }}"
+  register: ssh_bootstrap_public_key
+  when: ssh_bootstrap_enabled | bool
+
+- name: Validate SSH key files on controller
+  ansible.builtin.assert:
+    that:
+      - ssh_bootstrap_private_key.stat.exists
+      - ssh_bootstrap_private_key.stat.isreg
+      - ssh_bootstrap_public_key.stat.exists
+      - ssh_bootstrap_public_key.stat.isreg
+    fail_msg: >-
+      SSH key files were not found. Check ssh_bootstrap_identity_file and
+      ssh_bootstrap_public_key_file in vars-common.yaml.
+  when: ssh_bootstrap_enabled | bool
+
+- name: Validate host-specific SSH password map
+  ansible.builtin.assert:
+    that:
+      - vault_ssh_passwords | default({}) is mapping
+      - >-
+        (vault_ssh_passwords | default({}) | list |
+         difference(groups['tailscale'])) | length == 0
+    fail_msg: >-
+      vault_ssh_passwords must be a mapping whose keys are inventory hostnames
+      in the tailscale group.
+  when: ssh_bootstrap_enabled | bool

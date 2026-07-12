@@ -1,10 +1,9 @@
 ---
 # 접속/공통 OS 설정
-ssh_copy_id_enabled: true
-ssh_copy_id_identity_file: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/id_rsa"
-ssh_copy_id_public_key_file: "{{ ssh_copy_id_identity_file }}.pub"
-ssh_copy_id_connect_timeout: 10
-ssh_copy_id_strict_host_key_checking: accept-new
+ssh_bootstrap_enabled: true
+ssh_bootstrap_identity_file: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/id_rsa"
+ssh_bootstrap_public_key_file: "{{ ssh_bootstrap_identity_file }}.pub"
+ssh_bootstrap_connect_timeout: 10
 
 common_timezone: Asia/Seoul
 common_ntp_servers:

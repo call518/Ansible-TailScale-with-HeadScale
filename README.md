@@ -108,8 +108,6 @@ The control node requires the following commands:
 
 - `ansible-playbook`
 - `ssh`
-- `ssh-copy-id` — when SSH Bootstrap is enabled
-- `sshpass` — for non-interactive SSH Bootstrap with the optional vaulted password
 
 Managed nodes must already have NIC and IP configuration and be reachable over
 SSH.
@@ -117,10 +115,10 @@ SSH.
 ## Project Structure
 
 - `vars-common.yaml`: versions, paths, certificate DN, ports, and behavior shared by all nodes
-- `vars-vault.yaml`: optional user-created Vault file for SSH/sudo passwords, excluded from Git
+- `vars-vault.yaml`: Vault file for SSH Bootstrap and optional sudo passwords, excluded from Git
 - `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml`: OS-family-specific packages, services, CA trust, and Tailscale repository variables
 - `inventory.ini`: Ansible targets and management IP addresses
-- `roles/ssh_bootstrap`: optional initial SSH key deployment using `ssh-copy-id`
+- `roles/ssh_bootstrap`: parallel initial SSH key deployment using Vault authentication and built-in modules
 - `roles/os_compat`: supported OS/architecture validation and OS-specific variable loading
 - `roles/common`: common OS settings, time synchronization, hosts, packages, and optional firewalld
 - `roles/headscale`: CA/TLS, Headscale binary/config/policy/systemd/user
@@ -163,9 +161,10 @@ If passwordless SSH is not yet configured, set the following values in
 exist.
 
 ```yaml
-ssh_copy_id_enabled: true
-ssh_copy_id_identity_file: /root/.ssh/id_rsa
-ssh_copy_id_public_key_file: "{{ ssh_copy_id_identity_file }}.pub"
+ssh_bootstrap_enabled: true
+ssh_bootstrap_identity_file: /root/.ssh/id_rsa
+ssh_bootstrap_public_key_file: "{{ ssh_bootstrap_identity_file }}.pub"
+ssh_bootstrap_connect_timeout: 10
 ```
 
 When all targets share the same initial SSH password, store the common variable
@@ -202,12 +201,15 @@ vault_ssh_passwords:
 Map keys must exactly match hostnames in `inventory.ini`. A key outside the
 `tailscale` group is treated as a typo and stops deployment. Each host selects
 its password in this order: `vault_ssh_passwords[hostname]`,
-`vault_ssh_root_password`, then interactive input.
+`vault_ssh_root_password`. If neither exists, the role names that host and
+fails before opening its SSH connection. Interactive password entry is not
+supported.
 
-`vars-vault.yaml` is an optional file that is not supplied by the repository
-and is ignored by Git. Create it only to automate password entry. The default
-Vault master password file is `~/.ansible_vault_pass_tailscale`; restrict both
-files to mode `0600`.
+`vars-vault.yaml` is not supplied by the repository and is ignored by Git. It
+is required while SSH Bootstrap is enabled, but it may be absent after keys are
+deployed and `ssh_bootstrap_enabled: false` is used. The default Vault master
+password file is `~/.ansible_vault_pass_tailscale`; restrict both files to mode
+`0600`.
 
 ```bash
 ansible-vault create \
@@ -231,22 +233,36 @@ set only the password-file path in the environment:
 ANSIBLE_VAULT_PASSWORD_FILE=/secure/path/vault-pass ./run.sh
 ```
 
-When `vars-vault.yaml` supplies a host-map or common SSH password, the first
-Play runs `sshpass -e ssh-copy-id` with the value selected for each node and
-protects the password task with `no_log`. Without a Vault value for that host, ordinary
-`ssh-copy-id` prompts for each target's SSH password in the terminal. With
-`ssh_copy_id_enabled: false`, the complete deployment uses the existing SSH key
-without requiring Vault. If the same key already exists in remote
-`authorized_keys`, the check
-built into `ssh-copy-id` prevents duplication. Password authentication adds
-the key only when it is different or missing. After initial deployment,
-`ssh_copy_id_enabled` can be returned to `false`. Do not use the common-password
-method when targets prohibit root password login; use the actual SSH account
-with the host-specific Vault map or an existing SSH key instead.
+The first Play targets each host in the `tailscale` group directly instead of
+looping from localhost. After the initial Vault-authenticated SSH connection,
+the built-in `getent`, `file`, and `lineinfile` modules idempotently add the
+controller public key to the login account's `authorized_keys`. The default
+`forks = 20` in `ansible.cfg` processes up to 20 hosts concurrently; override
+it at runtime with a command such as `./run.sh --forks 50`. Failures are
+not immediately fatal to the whole run; only the failed host's remaining
+Bootstrap stages are skipped. After every host completes Vault validation, SSH
+authentication, account lookup, directory creation, and key deployment, a
+separate Gate reports all hostnames, management IPs, and failure stages at
+once. If any host failed, the Gate stops the entire playbook before common or
+later deployment plays begin. The output includes an `SSH Bootstrap summary:`
+header, per-host status, the `N of M` failure count and host list, and whether
+subsequent deployment plays were withheld.
+
+Failure stages are classified as `vault_validation`, `authentication`,
+`account_lookup`, `ssh_directory`, `authorized_keys`, or `missing_result`.
+This lets large environments identify and remediate every failing node from a
+single run.
+
+After initial key deployment, set `ssh_bootstrap_enabled: false` to run the
+complete deployment with the existing SSH key and without Vault. When root
+password login is prohibited, use the actual SSH account and host-specific
+Vault map.
 
 Do not commit either `vars-vault.yaml` or `~/.ansible_vault_pass_tailscale`.
-`run.sh` continues without Vault options when the Vault vars file is absent. It
-stops only when that file exists but its master password file is unreadable. No
+`run.sh` starts without Vault options when the Vault vars file is absent, but
+an enabled SSH Bootstrap play validates the missing password per host and
+stops. If the Vault file exists but its master password file is unreadable,
+`run.sh` stops immediately. No
 `vars-vault.example.yaml` is provided; this document is the source of truth for
 the required variable structure. If a plaintext password was committed, rotate
 it immediately and remove it from Git history.
@@ -374,12 +390,12 @@ through unchanged.
 
 `--check` is useful for previewing changes from standard Ansible modules such
 as template and package, but it cannot reproduce the complete behavior of
-command-based operations such as Pre-auth key creation, `tailscale up`, route
-approval, and `ssh-copy-id`. When running in check mode without SSH Bootstrap,
-passing `ssh_copy_id_enabled=false` is recommended.
+command-based operations such as Pre-auth key creation, `tailscale up`, and
+route approval. When running in check mode without SSH Bootstrap, passing
+`ssh_bootstrap_enabled=false` is recommended.
 
 ```bash
-./run.sh --check --diff -e ssh_copy_id_enabled=false
+./run.sh --check --diff -e ssh_bootstrap_enabled=false
 ```
 
 Use tags to run an individual Role or stage.
@@ -403,10 +419,10 @@ Headplane or the API owns subsequent policy changes. Set
 `headscale_policy_mode: file` to make the Ansible template authoritative again.
 
 To run disabled SSH Bootstrap once without editing the vars file, enable it
-with an extra variable.
+with an extra variable. Vault SSH passwords must be available.
 
 ```bash
-./run.sh --tags ssh_bootstrap -e ssh_copy_id_enabled=true
+./run.sh --tags ssh_bootstrap -e ssh_bootstrap_enabled=true
 ```
 
 Combine `--limit` with a tag to restrict the target hosts as well.

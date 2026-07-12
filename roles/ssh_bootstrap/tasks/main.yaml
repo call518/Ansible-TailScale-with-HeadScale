@@ -1,95 +1,114 @@
 ---
-- name: Explain disabled SSH bootstrap
-  ansible.builtin.debug:
-    msg: >-
-      SSH bootstrap is disabled. Set ssh_copy_id_enabled=true in
-      vars-common.yaml or pass -e ssh_copy_id_enabled=true.
-  when: not (ssh_copy_id_enabled | bool)
-
 - name: End disabled SSH bootstrap play
   ansible.builtin.meta: end_play
-  when: not (ssh_copy_id_enabled | bool)
+  when: not (ssh_bootstrap_enabled | bool)
 
-- name: Check SSH private key
-  ansible.builtin.stat:
-    path: "{{ ssh_copy_id_identity_file }}"
-  register: ssh_private_key
-  when: ssh_copy_id_enabled | bool
-
-- name: Check SSH public key
-  ansible.builtin.stat:
-    path: "{{ ssh_copy_id_public_key_file }}"
-  register: ssh_public_key
-  when: ssh_copy_id_enabled | bool
-
-- name: Validate SSH bootstrap prerequisites
-  ansible.builtin.assert:
-    that:
-      - ssh_private_key.stat.exists
-      - ssh_private_key.stat.isreg
-      - ssh_public_key.stat.exists
-      - ssh_public_key.stat.isreg
-    fail_msg: >-
-      SSH key files were not found. Check ssh_copy_id_identity_file and
-      ssh_copy_id_public_key_file in vars-common.yaml.
-  when: ssh_copy_id_enabled | bool
-
-- name: Validate host-specific SSH password map
-  ansible.builtin.assert:
-    that:
-      - vault_ssh_passwords | default({}) is mapping
-      - >-
-        (vault_ssh_passwords | default({}) | list |
-         difference(groups['tailscale'])) | length == 0
-    fail_msg: >-
-      vault_ssh_passwords must be a mapping whose keys are inventory hostnames
-      in the tailscale group.
-  when: ssh_copy_id_enabled | bool
-
-- name: Check sshpass command
-  ansible.builtin.command:
-    argv: [sshpass, -V]
-  changed_when: false
-  when:
-    - ssh_copy_id_enabled | bool
-    - >-
-      vault_ssh_root_password | default('') | length > 0 or
-      vault_ssh_passwords | default({}) | length > 0
-
-- name: Apply selected private key to inventory hosts
+- name: Initialize SSH bootstrap result
   ansible.builtin.set_fact:
-    ansible_ssh_private_key_file: "{{ ssh_copy_id_identity_file }}"
-  delegate_to: "{{ item }}"
-  delegate_facts: true
-  loop: "{{ groups['tailscale'] }}"
-  loop_control:
-    label: "{{ item }}"
-  when: ssh_copy_id_enabled | bool
+    ssh_bootstrap_result:
+      succeeded: false
+      stage: pending
+      message: Bootstrap has not completed
 
-- name: Ensure selected SSH public key is installed on every host
-  ansible.builtin.command:
-    argv: >-
-      {{ (["sshpass", "-e"] if (ssh_bootstrap_item_uses_vault | bool) else []) +
-         ["ssh-copy-id", "-i", ssh_copy_id_public_key_file,
-          "-o", "ConnectTimeout=" ~ (ssh_copy_id_connect_timeout | string),
-          "-o", "StrictHostKeyChecking=" ~ ssh_copy_id_strict_host_key_checking,
-          "-p", hostvars[item].ansible_port | default(22) | string,
-          (hostvars[item].ansible_user | default('root')) ~ "@" ~
-          hostvars[item].ansible_host] }}
-  environment:
-    SSHPASS: "{{ ssh_bootstrap_password }}"
-  vars:
-    ssh_bootstrap_password: >-
-      {{ (vault_ssh_passwords | default({})).get(
-           item, vault_ssh_root_password | default('')) }}
-    ssh_bootstrap_item_uses_vault: >-
-      {{ ssh_bootstrap_password | length > 0 }}
-  loop: "{{ groups['tailscale'] }}"
-  loop_control:
-    label: "{{ item }} ({{ hostvars[item].ansible_host }})"
-  register: ssh_copy_id_results
-  no_log: "{{ ssh_bootstrap_item_uses_vault | bool }}"
-  when: ssh_copy_id_enabled | bool
-  changed_when: >-
-    'All keys were skipped' not in
-    (ssh_copy_id_results.stdout + ssh_copy_id_results.stderr)
+- name: Record missing vaulted SSH password
+  ansible.builtin.set_fact:
+    ssh_bootstrap_result:
+      succeeded: false
+      stage: vault_validation
+      message: No host-specific or common vaulted SSH password is available
+  when: ansible_password | length == 0
+
+- name: Test initial SSH authentication and connectivity
+  ansible.builtin.wait_for_connection:
+    connect_timeout: "{{ ssh_bootstrap_connect_timeout }}"
+    timeout: "{{ ssh_bootstrap_connect_timeout }}"
+  register: ssh_bootstrap_connection
+  ignore_errors: true
+  ignore_unreachable: true
+  when: ssh_bootstrap_result.stage == 'pending'
+
+- name: Record SSH authentication or connectivity failure
+  ansible.builtin.set_fact:
+    ssh_bootstrap_result:
+      succeeded: false
+      stage: authentication
+      message: SSH authentication or connectivity failed
+  when:
+    - ssh_bootstrap_result.stage == 'pending'
+    - >-
+      ssh_bootstrap_connection is failed or
+      ssh_bootstrap_connection.unreachable | default(false) | bool
+
+- name: Read SSH account from passwd database
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ ansible_user }}"
+  register: ssh_bootstrap_account
+  ignore_errors: true
+  ignore_unreachable: true
+  when: ssh_bootstrap_result.stage == 'pending'
+
+- name: Record SSH account lookup failure
+  ansible.builtin.set_fact:
+    ssh_bootstrap_result:
+      succeeded: false
+      stage: account_lookup
+      message: SSH login account was not found in the passwd database
+  when:
+    - ssh_bootstrap_result.stage == 'pending'
+    - >-
+      ssh_bootstrap_account is failed or
+      ssh_bootstrap_account.unreachable | default(false) | bool
+
+- name: Create SSH directory for login account
+  ansible.builtin.file:
+    path: "{{ getent_passwd[ansible_user][4] }}/.ssh"
+    state: directory
+    mode: "0700"
+  register: ssh_bootstrap_directory
+  ignore_errors: true
+  ignore_unreachable: true
+  when: ssh_bootstrap_result.stage == 'pending'
+
+- name: Record SSH directory creation failure
+  ansible.builtin.set_fact:
+    ssh_bootstrap_result:
+      succeeded: false
+      stage: ssh_directory
+      message: Failed to create the SSH directory for the login account
+  when:
+    - ssh_bootstrap_result.stage == 'pending'
+    - >-
+      ssh_bootstrap_directory is failed or
+      ssh_bootstrap_directory.unreachable | default(false) | bool
+
+- name: Install controller public key for login account
+  ansible.builtin.lineinfile:
+    path: "{{ getent_passwd[ansible_user][4] }}/.ssh/authorized_keys"
+    line: "{{ lookup('ansible.builtin.file', ssh_bootstrap_public_key_file) }}"
+    create: true
+    mode: "0600"
+  register: ssh_bootstrap_authorized_key
+  ignore_errors: true
+  ignore_unreachable: true
+  when: ssh_bootstrap_result.stage == 'pending'
+
+- name: Record authorized keys update failure
+  ansible.builtin.set_fact:
+    ssh_bootstrap_result:
+      succeeded: false
+      stage: authorized_keys
+      message: Failed to install the controller public key
+  when:
+    - ssh_bootstrap_result.stage == 'pending'
+    - >-
+      ssh_bootstrap_authorized_key is failed or
+      ssh_bootstrap_authorized_key.unreachable | default(false) | bool
+
+- name: Record successful SSH bootstrap
+  ansible.builtin.set_fact:
+    ssh_bootstrap_result:
+      succeeded: true
+      stage: complete
+      message: Controller public key is installed
+  when: ssh_bootstrap_result.stage == 'pending'
