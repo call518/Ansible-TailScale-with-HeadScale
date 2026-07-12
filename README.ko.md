@@ -59,15 +59,26 @@ flowchart TB
     ADMIN["관리자 브라우저"]
     MESH(("Tailscale 암호화 데이터 Mesh<br/>직접 Peer / Embedded DERP 우회"))
 
-    R1["tailscale-01<br/>(Site-A Subnet Router)<br/>OS: Rocky 10 / Ubuntu 26.04<br/>MGMT: 192.168.156.101<br/>SITE CIDR: 10.10.10.0/24 (ens224)"]
-    R2["tailscale-02<br/>(Site-B Subnet Router)<br/>OS: Rocky 10 / Ubuntu 26.04<br/>MGMT: 192.168.156.102<br/>SITE CIDR: 10.10.20.0/24 (ens224)"]
-    R3["tailscale-03<br/>(Site-C Subnet Router)<br/>OS: Rocky 10 / Ubuntu 26.04<br/>MGMT: 192.168.156.103<br/>SITE CIDR: 10.10.30.0/24 (ens37)"]
-    R4["tailscale-04<br/>(Site-D Subnet Router)<br/>OS: Rocky 10 / Ubuntu 26.04<br/>MGMT: 192.168.156.104<br/>SITE CIDR: 10.10.40.0/24 (ens37)"]
-
-    E1["Site-A L3 Ping 테스트 단말<br/>(임시 netns Client)<br/>TEST IP: 10.10.10.126"]
-    E2["Site-B L3 Ping 테스트 단말<br/>(임시 netns Client)<br/>TEST IP: 10.10.20.126"]
-    E3["Site-C L3 Ping 테스트 단말<br/>(임시 netns Client)<br/>TEST IP: 10.10.30.126"]
-    E4["Site-D L3 Ping 테스트 단말<br/>(임시 netns Client)<br/>TEST IP: 10.10.40.126"]
+    subgraph SITE1["tailscale-01 / Site-A<br/>OS: Rocky 10 / Ubuntu 26.04 · MGMT: 192.168.156.101"]
+        R1["Subnet Router<br/>SITE CIDR: 10.10.10.0/24 (ens224)"]
+        E1["ns-test · 임시 Ping Client<br/>veth-ns: 10.10.10.126/24<br/>Gateway: 10.10.10.127"]
+        R1 -->|"veth pair"| E1
+    end
+    subgraph SITE2["tailscale-02 / Site-B<br/>OS: Rocky 10 / Ubuntu 26.04 · MGMT: 192.168.156.102"]
+        R2["Subnet Router<br/>SITE CIDR: 10.10.20.0/24 (ens224)"]
+        E2["ns-test · 임시 Ping Client<br/>veth-ns: 10.10.20.126/24<br/>Gateway: 10.10.20.127"]
+        R2 -->|"veth pair"| E2
+    end
+    subgraph SITE3["tailscale-03 / Site-C<br/>OS: Rocky 10 / Ubuntu 26.04 · MGMT: 192.168.156.103"]
+        R3["Subnet Router<br/>SITE CIDR: 10.10.30.0/24 (ens37)"]
+        E3["ns-test · 임시 Ping Client<br/>veth-ns: 10.10.30.126/24<br/>Gateway: 10.10.30.127"]
+        R3 -->|"veth pair"| E3
+    end
+    subgraph SITE4["tailscale-04 / Site-D<br/>OS: Rocky 10 / Ubuntu 26.04 · MGMT: 192.168.156.104"]
+        R4["Subnet Router<br/>SITE CIDR: 10.10.40.0/24 (ens37)"]
+        E4["ns-test · 임시 Ping Client<br/>veth-ns: 10.10.40.126/24<br/>Gateway: 10.10.40.127"]
+        R4 -->|"veth pair"| E4
+    end
     GOAL[["검증 목표<br/>모든 Site 간 L3 상호 Ping<br/>4개 Site = 12방향 테스트"]]
 
     HS -. "조정 / Route 제어" .-> R1
@@ -81,11 +92,6 @@ flowchart TB
     R2 <==> MESH
     R3 <==> MESH
     R4 <==> MESH
-
-    R1 --> E1
-    R2 --> E2
-    R3 --> E3
-    R4 --> E4
 
     E1 -.-> GOAL
     E2 -.-> GOAL
@@ -106,6 +112,10 @@ flowchart TB
     class MESH mesh;
     class GOAL goal;
     style HEAD fill:#f8f9fa,stroke:#57606a,stroke-width:2px
+    style SITE1 fill:#f8f9fa,stroke:#57606a,stroke-width:2px
+    style SITE2 fill:#f8f9fa,stroke:#57606a,stroke-width:2px
+    style SITE3 fill:#f8f9fa,stroke:#57606a,stroke-width:2px
+    style SITE4 fill:#f8f9fa,stroke:#57606a,stroke-width:2px
 ```
 
 제어 노드에는 다음 명령이 필요하다.
