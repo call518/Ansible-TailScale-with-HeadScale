@@ -7,6 +7,14 @@
     home: "{{ headscale_data_dir }}"
     shell: "{{ headscale_nologin_shell }}"
 
+- name: Validate Headscale policy mode
+  ansible.builtin.assert:
+    that:
+      - headscale_policy_mode in ['file', 'database']
+    fail_msg: >-
+      headscale_policy_mode must be either 'file' or 'database', not
+      '{{ headscale_policy_mode }}'.
+
 - name: Validate Headscale runtime directory
   ansible.builtin.assert:
     that:
@@ -363,3 +371,57 @@
     argv: ["{{ headscale_binary_path }}", users, create, "{{ headscale_user_name }}"]
   when: headscale_user_name not in (headscale_users.stdout | from_json | map(attribute='name') | list)
   changed_when: true
+
+- name: Seed initial database policy
+  when: headscale_policy_mode == 'database'
+  block:
+    - name: Read existing database policy
+      ansible.builtin.command:
+        argv:
+          - "{{ headscale_binary_path }}"
+          - policy
+          - get
+      register: existing_headscale_database_policy
+      changed_when: false
+      failed_when: false
+
+    - name: Validate database policy lookup result
+      ansible.builtin.assert:
+        that:
+          - >-
+            existing_headscale_database_policy.rc == 0 or
+            (existing_headscale_database_policy.rc == 1 and
+             'acl policy not found' in
+             existing_headscale_database_policy.stderr | lower)
+        fail_msg: >-
+          Failed to read the Headscale database policy:
+          {{ existing_headscale_database_policy.stderr |
+             default('No error output') }}
+
+    - name: Validate initial database policy
+      ansible.builtin.command:
+        argv:
+          - "{{ headscale_binary_path }}"
+          - policy
+          - check
+          - --file
+          - "{{ headscale_policy_path }}"
+      when: >-
+        existing_headscale_database_policy.rc == 1 and
+        'acl policy not found' in
+        existing_headscale_database_policy.stderr | lower
+      changed_when: false
+
+    - name: Store initial policy in Headscale database
+      ansible.builtin.command:
+        argv:
+          - "{{ headscale_binary_path }}"
+          - policy
+          - set
+          - --file
+          - "{{ headscale_policy_path }}"
+      when: >-
+        existing_headscale_database_policy.rc == 1 and
+        'acl policy not found' in
+        existing_headscale_database_policy.stderr | lower
+      changed_when: true

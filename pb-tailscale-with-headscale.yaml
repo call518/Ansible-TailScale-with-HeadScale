@@ -40,6 +40,20 @@
       tags:
         - headscale
 
+- name: Install Docker CE and Headplane
+  hosts: headscale
+  become: true
+  gather_facts: true
+  vars_files:
+    - vars-common.yaml
+  tags:
+    - headplane
+  roles:
+    - role: os_compat
+    - role: headplane
+      tags:
+        - headplane
+
 - name: Install and register Tailscale subnet routers
   hosts: tailscale_routers
   become: true

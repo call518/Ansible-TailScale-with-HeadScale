@@ -110,7 +110,8 @@ headscale_tls_cert_path: "{{ headscale_config_dir }}/tls/server.crt"
 headscale_tls_key_path: "{{ headscale_config_dir }}/tls/server.key"
 headscale_log_level: info
 headscale_log_format: text
-headscale_policy_mode: file
+# file: policy.hujson.j2를 매 실행마다 배포, database: Headplane/API에서 SQLite 정책 관리
+headscale_policy_mode: database
 headscale_policy_path: "{{ headscale_config_dir }}/policy.hujson"
 headscale_magic_dns: true
 headscale_dns_domain: tailnet.internal
@@ -137,6 +138,19 @@ headscale_ca_dn:
   organization: Headscale-Lab
   organizational_unit: Infrastructure
   common_name: Headscale Lab Root CA
+
+# Headplane (Headscale 관리 UI, Docker Limited Mode)
+headplane_version: "0.7.0"
+headplane_image: "ghcr.io/tale/headplane:{{ headplane_version }}"
+headplane_container_name: headplane
+headplane_listen_address: "{{ hostvars[groups['headscale'][0]].ansible_host }}"
+headplane_port: 3000
+headplane_base_url: "http://{{ headplane_listen_address }}:{{ headplane_port }}"
+headplane_headscale_url: "https://{{ hostvars[groups['headscale'][0]].ansible_host }}:{{ headscale_listen_port }}"
+headplane_config_dir: /opt/headplane
+headplane_config_path: "{{ headplane_config_dir }}/config.yaml"
+headplane_cookie_secret_path: "{{ headplane_config_dir }}/cookie_secret"
+headplane_data_volume: headplane-data
 # Tailscale subnet router
 tailscale_package: tailscale
 tailscale_udp_port: 41641
@@ -148,7 +162,7 @@ tailscale_manage_mss_clamping: true
 tailscale_interface: tailscale0
 
 # 선택적 Site-to-Site netns 검증
-tailscale_site_test_enabled: false
+tailscale_site_test_enabled: true
 tailscale_site_test_cleanup_after_validation: false
 tailscale_site_test_namespace: ns-test
 tailscale_site_test_veth_host: veth-host

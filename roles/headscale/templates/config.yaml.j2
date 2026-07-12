@@ -59,7 +59,9 @@ log:
   format: {{ headscale_log_format }}
 policy:
   mode: {{ headscale_policy_mode }}
+{% if headscale_policy_mode == 'file' %}
   path: {{ headscale_policy_path }}
+{% endif %}
 dns:
   magic_dns: {{ headscale_magic_dns | bool | lower }}
   base_domain: {{ headscale_dns_domain }}

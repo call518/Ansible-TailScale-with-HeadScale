@@ -1,0 +1,26 @@
+server:
+  host: "0.0.0.0"
+  port: {{ headplane_port }}
+  base_url: {{ headplane_base_url | to_json }}
+  cookie_secret_path: "/run/secrets/cookie_secret"
+  cookie_secure: false
+  cookie_max_age: 86400
+  data_path: "/var/lib/headplane"
+
+headscale:
+  url: {{ headplane_headscale_url | to_json }}
+  public_url: {{ headplane_headscale_url | to_json }}
+
+integration:
+  agent:
+    enabled: false
+  docker:
+    enabled: false
+    container_label: "me.tale.headplane.target=headscale"
+    socket: "unix:///var/run/docker.sock"
+  kubernetes:
+    enabled: false
+    validate_manifest: true
+    pod_name: "headscale"
+  proc:
+    enabled: false

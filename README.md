@@ -45,7 +45,14 @@ Tailnet but is not a mandatory central data-path gateway.
 
 ```mermaid
 flowchart TB
-    HS["tailscale-head<br/>(Headscale Control Server)<br/>OS: Rocky 10 / Ubuntu 26.04<br/>MGMT: 192.168.156.100"]
+    subgraph HEAD["tailscale-head<br/>OS: Rocky 10 / Ubuntu 26.04<br/>MGMT: 192.168.156.100"]
+        direction TB
+        HS["Headscale 0.29.1<br/>Control Server / Embedded DERP<br/>HTTPS: 443"]
+        HP["Headplane 0.7.0<br/>Docker CE Limited Mode<br/>HTTP: 3000"]
+        CLI["Administrator CLI<br/>headscale commands<br/>Local operations and recovery"]
+        CLI -->|"Unix socket / local config"| HS
+    end
+    ADMIN["Administrator Browser"]
     MESH(("Encrypted Tailscale Data Mesh<br/>Direct Peer / Embedded DERP fallback"))
 
     R1["tailscale-01<br/>(Site-A Subnet Router)<br/>OS: Rocky 10 / Ubuntu 26.04<br/>MGMT: 192.168.156.101<br/>SITE CIDR: 10.10.10.0/24 (ens224)"]
@@ -63,6 +70,8 @@ flowchart TB
     HS -. "Coordination / route control" .-> R2
     HS -. "Coordination / route control" .-> R3
     HS -. "Coordination / route control" .-> R4
+    ADMIN -->|"API key login"| HP
+    HP -. "HTTPS Headscale API<br/>Private CA trust" .-> HS
 
     R1 <==> MESH
     R2 <==> MESH
@@ -85,10 +94,14 @@ flowchart TB
     classDef mesh fill:#f3e8ff,stroke:#8250df,color:#512a97;
     classDef goal fill:#fff0f6,stroke:#bf3989,color:#7d2457;
     class HS control;
+    class HP control;
+    class CLI control;
+    class ADMIN endpoint;
     class R1,R2,R3,R4 router;
     class E1,E2,E3,E4 endpoint;
     class MESH mesh;
     class GOAL goal;
+    style HEAD fill:#f8f9fa,stroke:#57606a,stroke-width:2px
 ```
 
 The control node requires the following commands:
@@ -109,6 +122,7 @@ SSH.
 - `roles/os_compat`: supported OS/architecture validation and OS-specific variable loading
 - `roles/common`: common OS settings, time synchronization, hosts, packages, and optional firewalld
 - `roles/headscale`: CA/TLS, Headscale binary/config/policy/systemd/user
+- `roles/headplane`: Docker CE and the Headplane admin UI in Limited Mode
 - `roles/tailscale_router`: CA trust, Tailscale, forwarding, MSS Clamping, and node registration
 - `roles/site_test_endpoint`: optional netns test endpoint creation and inter-Site ping validation
 - `pb-tailscale-with-headscale.yaml`: complete execution order and subnet route approval
@@ -264,10 +278,19 @@ Use tags to run an individual Role or stage.
 ./run.sh --tags ssh_bootstrap
 ./run.sh --tags common
 ./run.sh --tags headscale
+./run.sh --tags headplane
 ./run.sh --tags tailscale_router
 ./run.sh --tags route_approval
 ./run.sh --tags site_test_endpoint -e tailscale_site_test_enabled=true
 ```
+
+Headplane starts after the Headscale API is ready and listens on TCP 3000 of
+the `tailscale-head` management address. Open
+`http://192.168.156.100:3000/admin/` and log in with a Headscale API key. The
+API key is not stored in Ansible variables or the Headplane configuration. The
+default `database` policy mode seeds `policy.hujson.j2` into SQLite once, then
+Headplane or the API owns subsequent policy changes. Set
+`headscale_policy_mode: file` to make the Ansible template authoritative again.
 
 To run disabled SSH Bootstrap once without editing the vars file, enable it
 with an extra variable.
@@ -343,7 +366,9 @@ already registered does not create a new Pre-auth key; `tailscale up` instead
 reconciles it with the desired settings. Headscale creates a one-time key only
 for an unregistered node, and Ansible hides the key from its output.
 
-- Config/policy/systemd/TLS deployment change: restart Headscale
+- Config/systemd/TLS deployment change: restart Headscale
+- File policy change: deploy the Ansible template and restart Headscale
+- Database policy change: Headplane/API writes SQLite; Ansible does not overwrite it
 - CA change: reissue the CA and server certificate, update trust stores, and restart related services
 - Server SAN/IP change: reissue the server certificate
 - Forwarding change: apply `sysctl --system`
@@ -367,11 +392,150 @@ and keys are not moved automatically to prevent data loss. To preserve state,
 plan and perform migration of the database and noise/DERP keys before running
 the playbook.
 
+## Policy Storage Modes and Migration
+
+`headscale_policy_mode` selects the authoritative policy store. The default is
+`database` so Headplane can edit Access Control, while the DBMS remains SQLite.
+
+```yaml
+headscale_database_type: sqlite
+headscale_database_path: "{{ headscale_data_dir }}/db.sqlite"
+headscale_policy_mode: database
+headscale_policy_path: "{{ headscale_config_dir }}/policy.hujson"
+```
+
+| Mode | Authoritative policy | Role of `policy.hujson.j2` |
+|---|---|---|
+| `file` | `/etc/headscale/policy.hujson` | Always-active source |
+| Initial `database` install | Empty SQLite policy | Initial policy seed |
+| Running `database` install | `/var/lib/headscale/db.sqlite` | Seed, recovery, and file-mode fallback |
+
+Headscale itself does not automatically read `policy.hujson` in database mode.
+This project's role validates and stores the template with `headscale policy
+set` only when `headscale policy get` returns `acl policy not found`. Any
+stored policy, including `{}` or an empty `grants` policy, is preserved as a
+valid operator policy, so later Ansible runs do not overwrite Headplane/API
+changes.
+
+To permanently select file mode, change the variable and apply the role:
+
+```yaml
+headscale_policy_mode: file
+```
+
+```bash
+./run.sh --tags headscale
+```
+
+### Safely Migrating an Existing File Policy to Database Mode
+
+Preload the file policy into SQLite before changing modes to avoid a transient
+default-allow period. Run these commands as root on `tailscale-head`:
+
+```bash
+headscale policy check --file /etc/headscale/policy.hujson
+cp -a /etc/headscale/policy.hujson /root/policy-before-database.hujson
+systemctl stop headscale
+install -d -m 0700 /root/headscale-backup-before-policy-database
+cp -a /var/lib/headscale/db.sqlite /root/headscale-backup-before-policy-database/
+find /var/lib/headscale -maxdepth 1 -type f -name 'db.sqlite-*' \
+  -exec cp -a {} /root/headscale-backup-before-policy-database/ \;
+runuser -u headscale -- /usr/local/bin/headscale \
+  -c /etc/headscale/config.yaml policy set \
+  --bypass-server-and-access-database-directly \
+  --file /etc/headscale/policy.hujson
+```
+
+Then set `headscale_policy_mode: database` on the control node and apply it:
+
+```bash
+./run.sh --tags headscale
+```
+
+Verify the result:
+
+```bash
+grep -A 2 '^policy:' /etc/headscale/config.yaml
+headscale policy get > /root/policy-effective-after-database.hujson
+headscale policy check --file /root/policy-effective-after-database.hujson
+curl -k https://192.168.156.100/health
+```
+
+When intentionally creating a new SQLite DB, the next Ansible run detects the
+missing policy and seeds it again automatically. Stop and back up Headscale
+before deleting production database state.
+
+Use these commands for routine database-policy backup and recovery:
+
+```bash
+headscale policy get > /root/policy-backup.hujson
+headscale policy check --file /root/policy-backup.hujson
+headscale policy set --file /root/policy-backup.hujson
+```
+
+If an invalid DB policy prevents API access, add
+`--bypass-server-and-access-database-directly` to `policy get/set`. Stop
+Headscale and run direct DB operations as the `headscale` user to preserve
+SQLite file ownership.
+
+## Headplane Admin UI
+
+After Headscale installation, the Headplane role installs Docker CE on
+`tailscale-head` and runs the pinned `ghcr.io/tale/headplane:0.7.0` image in
+Limited Mode. It does not change the existing systemd Headscale service or TCP
+443 listener, and it does not mount the Docker socket, Headscale DB, or TLS
+private keys into the container.
+
+```yaml
+headplane_version: "0.7.0"
+headplane_port: 3000
+headplane_config_dir: /opt/headplane
+headplane_data_volume: headplane-data
+```
+
+The role creates the cookie secret once and passes the public Headscale Root CA
+through `NODE_EXTRA_CA_CERTS`. It recreates the container only when the
+configuration, secret, CA, or image ID deployment hash changes, while retaining
+the `headplane-data` volume. The Headscale API key is entered on the login page
+and is not stored in Ansible or the configuration file.
+
+```bash
+./run.sh --tags headplane
+```
+
+Access and verify Headplane:
+
+```text
+http://192.168.156.100:3000/admin/
+```
+
+```bash
+docker inspect headplane \
+  --format 'status={{.State.Status}} health={{.State.Health.Status}} restarts={{.RestartCount}}'
+docker logs --tail 100 headplane
+```
+
+Healthy logs contain `Connected to Headscale 0.29.1`, and the health status is
+`healthy`. Headplane currently serves HTTP, so expose TCP 3000 only to a
+trusted management network, never the internet. The role opens 3000/tcp when
+`common_manage_firewalld: true`.
+
+Removing the container does not affect Headscale. Remove the volume and
+configuration directory only when intentionally discarding Headplane data.
+
+```bash
+docker rm -f headplane
+docker volume rm headplane-data
+rm -rf /opt/headplane
+```
+
 ## Verification
 
 ```bash
 ansible tailscale -b -m command -a 'systemctl is-active firewalld'
 ansible headscale -b -m command -a 'headscale nodes list-routes'
+ansible headscale -b -m command -a 'headscale policy get'
+ansible headscale -b -m command -a 'docker inspect headplane'
 ansible tailscale_routers -b -m command -a 'tailscale status'
 ansible tailscale_routers -b -m command -a 'sysctl net.ipv4.ip_forward'
 ansible tailscale_routers -b -m command -a 'systemctl is-active tailscale-mss-clamping'

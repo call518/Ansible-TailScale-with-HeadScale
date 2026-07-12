@@ -1,0 +1,236 @@
+---
+- name: Validate Headplane settings
+  ansible.builtin.assert:
+    that:
+      - headplane_port | int > 0
+      - headplane_port | int < 65536
+      - headplane_listen_address | length > 0
+      - headplane_headscale_url is match('^https://')
+    fail_msg: Headplane requires a valid management address, port, and HTTPS Headscale URL.
+
+- name: Install Docker APT signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /usr/share/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+  when: ansible_os_family == 'Debian'
+
+- name: Configure Docker APT repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64 signed-by=/usr/share/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu
+      {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+
+- name: Configure Docker RPM repository
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/centos/docker-ce.repo
+    dest: /etc/yum.repos.d/docker-ce.repo
+    owner: root
+    group: root
+    mode: "0644"
+  when: ansible_os_family == 'RedHat'
+
+- name: Install Docker CE
+  ansible.builtin.package:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+
+- name: Enable and start Docker
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Create Headplane configuration directory
+  ansible.builtin.file:
+    path: "{{ headplane_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check Headplane cookie secret
+  ansible.builtin.stat:
+    path: "{{ headplane_cookie_secret_path }}"
+  register: headplane_cookie_secret
+
+- name: Generate Headplane cookie secret
+  ansible.builtin.command:
+    argv: [openssl, rand, -hex, "16"]
+  register: generated_headplane_cookie_secret
+  when: not headplane_cookie_secret.stat.exists
+  no_log: true
+  changed_when: true
+
+- name: Store Headplane cookie secret
+  ansible.builtin.copy:
+    content: "{{ generated_headplane_cookie_secret.stdout }}\n"
+    dest: "{{ headplane_cookie_secret_path }}"
+    owner: root
+    group: root
+    mode: "0444"
+  when: not headplane_cookie_secret.stat.exists
+  no_log: true
+
+- name: Protect existing Headplane cookie secret
+  ansible.builtin.file:
+    path: "{{ headplane_cookie_secret_path }}"
+    owner: root
+    group: root
+    mode: "0444"
+
+- name: Render Headplane configuration
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ headplane_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Pull pinned Headplane image
+  ansible.builtin.command:
+    argv: [docker, pull, "{{ headplane_image }}"]
+  register: headplane_pull
+  changed_when: >-
+    'Downloaded newer image' in headplane_pull.stdout or
+    'Pull complete' in headplane_pull.stdout
+
+- name: Read Headplane image metadata
+  ansible.builtin.command:
+    argv: [docker, image, inspect, "{{ headplane_image }}"]
+  register: headplane_image_inspect
+  changed_when: false
+
+- name: Check Headplane data volume
+  ansible.builtin.command:
+    argv: [docker, volume, inspect, "{{ headplane_data_volume }}"]
+  register: headplane_volume_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Create Headplane data volume
+  ansible.builtin.command:
+    argv: [docker, volume, create, "{{ headplane_data_volume }}"]
+  when: headplane_volume_inspect.rc != 0
+  changed_when: true
+
+- name: Read Headplane deployment files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - "{{ headplane_config_path }}"
+    - "{{ headplane_cookie_secret_path }}"
+    - "{{ headscale_pki_dir }}/headscale-root-ca.crt"
+  register: headplane_deployment_files
+
+- name: Calculate Headplane deployment hash
+  ansible.builtin.set_fact:
+    headplane_deployment_hash: >-
+      {{ ([(headplane_image_inspect.stdout | from_json | first).Id] +
+          (headplane_deployment_files.results | map(attribute='stat.checksum') | list)) |
+         join(':') | hash('sha256') }}
+
+- name: Inspect existing Headplane container
+  ansible.builtin.command:
+    argv: [docker, inspect, "{{ headplane_container_name }}"]
+  register: headplane_container_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Read current Headplane deployment hash
+  ansible.builtin.set_fact:
+    current_headplane_deployment_hash: >-
+      {{ ((headplane_container_inspect.stdout | from_json | first).Config.Labels |
+          default({})).get('org.headplane.deployment-hash', '') }}
+  when: headplane_container_inspect.rc == 0
+
+- name: Remove outdated Headplane container
+  ansible.builtin.command:
+    argv: [docker, rm, -f, "{{ headplane_container_name }}"]
+  when:
+    - headplane_container_inspect.rc == 0
+    - current_headplane_deployment_hash | default('') != headplane_deployment_hash
+  changed_when: true
+
+- name: Run Headplane container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - -d
+      - --name
+      - "{{ headplane_container_name }}"
+      - --restart
+      - unless-stopped
+      - --label
+      - "org.headplane.deployment-hash={{ headplane_deployment_hash }}"
+      - -p
+      - "{{ headplane_listen_address }}:{{ headplane_port }}:{{ headplane_port }}"
+      - -e
+      - NODE_EXTRA_CA_CERTS=/etc/headplane/headscale-root-ca.crt
+      - --mount
+      - "type=bind,src={{ headplane_config_path }},dst=/etc/headplane/config.yaml,readonly"
+      - --mount
+      - "type=bind,src={{ headplane_cookie_secret_path }},dst=/run/secrets/cookie_secret,readonly"
+      - --mount
+      - "type=bind,src={{ headscale_pki_dir }}/headscale-root-ca.crt,dst=/etc/headplane/headscale-root-ca.crt,readonly"
+      - --mount
+      - "source={{ headplane_data_volume }},target=/var/lib/headplane"
+      - "{{ headplane_image }}"
+  when: >-
+    headplane_container_inspect.rc != 0 or
+    current_headplane_deployment_hash | default('') != headplane_deployment_hash
+  changed_when: true
+
+- name: Start existing Headplane container
+  ansible.builtin.command:
+    argv: [docker, start, "{{ headplane_container_name }}"]
+  when:
+    - headplane_container_inspect.rc == 0
+    - current_headplane_deployment_hash | default('') == headplane_deployment_hash
+    - not (headplane_container_inspect.stdout | from_json | first).State.Running
+  changed_when: true
+
+- name: Wait for Headplane health check
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{% raw %}{{.State.Health.Status}}{% endraw %}"
+      - "{{ headplane_container_name }}"
+  register: headplane_health
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: headplane_health.stdout == 'healthy'
+
+- name: Check Headplane firewall port
+  ansible.builtin.command: >-
+    firewall-cmd --permanent --query-port={{ headplane_port }}/tcp
+  when: common_manage_firewalld | bool
+  register: headplane_firewall_check
+  changed_when: false
+  failed_when: false
+
+- name: Open Headplane firewall port
+  ansible.builtin.command: >-
+    firewall-cmd --permanent --add-port={{ headplane_port }}/tcp
+  when:
+    - common_manage_firewalld | bool
+    - headplane_firewall_check.rc != 0
+  notify: Reload firewalld
+  changed_when: true
