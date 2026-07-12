@@ -26,8 +26,10 @@ Jinja filter 및 task 동작의 호환성을 보장하지 않는다.
 Rocky Linux 10과 Ubuntu 26.04 LTS amd64에서 초기 OS 대상 전체 설치, Headscale
 등록, subnet route 승인 및 Site-to-Site 통신을 실제 검증했다. Role은 Ansible
 Facts로 OS를 자동 판별하여 패키지명, Chrony 설정과 서비스, CA trust 및 Tailscale
-저장소를 선택하므로 지원 OS를 vars에서 따로 지정할 필요가 없다. 현재 명시적 지원
-대상이 아닌 배포판과 버전은 설치 초기에 중단한다.
+저장소를 선택하므로 지원 OS를 vars에서 따로 지정할 필요가 없다. 모든 노드를 하나의
+OS로 통일할 필요도 없으며, 동일 inventory 안에 Rocky Linux 10과 Ubuntu 26.04 노드가
+혼재해도 각 노드에 맞는 설정을 자동 적용하여 함께 배포·운영할 수 있다. 현재 명시적
+지원 대상이 아닌 배포판과 버전은 설치 초기에 중단한다.
 
 ## 검증된 4개 Site 토폴로지
 

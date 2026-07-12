@@ -30,8 +30,11 @@ approval, and Site-to-Site connectivity have been validated on both Rocky
 Linux 10 and Ubuntu 26.04 LTS amd64. Roles automatically detect the OS through
 Ansible Facts and select the appropriate package names, Chrony configuration
 and service, CA trust store, and Tailscale repository. There is no need to set
-the target OS in vars. Distributions and versions that are not explicitly
-supported stop early in the installation.
+the target OS in vars or standardize every node on one distribution. Rocky
+Linux 10 and Ubuntu 26.04 nodes can coexist in the same inventory; each node
+automatically receives its OS-specific configuration and can be deployed and
+operated as one environment. Distributions and versions that are not
+explicitly supported stop early in the installation.
 
 ## Validated Four-Site Topology
 
