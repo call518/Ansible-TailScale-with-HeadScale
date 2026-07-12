@@ -109,6 +109,7 @@ The control node requires the following commands:
 - `ansible-playbook`
 - `ssh`
 - `ssh-copy-id` — when SSH Bootstrap is enabled
+- `sshpass` — for non-interactive SSH Bootstrap with the vaulted password
 
 Managed nodes must already have NIC and IP configuration and be reachable over
 SSH.
@@ -116,6 +117,7 @@ SSH.
 ## Project Structure
 
 - `vars-common.yaml`: versions, paths, certificate DN, ports, and behavior shared by all nodes
+- `vars-vault.yaml`: user-created Vault file for the common initial SSH password, excluded from Git
 - `vars/os`: OS-family-specific packages, services, CA trust, and Tailscale repository variables
 - `inventory.ini`: Ansible targets and management IP addresses
 - `roles/ssh_bootstrap`: optional initial SSH key deployment using `ssh-copy-id`
@@ -141,8 +143,7 @@ password is required. Host variables take precedence over
 
 If passwordless SSH is not yet configured, set the following values in
 `vars-common.yaml`. A `.pub` public key matching the private key name must
-exist. The password is not stored in a file; `ssh-copy-id` prompts for it
-directly in the terminal while running.
+exist.
 
 ```yaml
 ssh_copy_id_enabled: true
@@ -150,12 +151,54 @@ ssh_copy_id_identity_file: /root/.ssh/id_rsa
 ssh_copy_id_public_key_file: "{{ ssh_copy_id_identity_file }}.pub"
 ```
 
-The first Play runs `ssh-copy-id` for every inventory host. If the same public
-key already exists in the remote `authorized_keys`, the check built into
-`ssh-copy-id` prevents duplication. Password authentication is used to add the
-key only when the selected key is different or missing. After the initial key
-deployment, `ssh_copy_id_enabled` can be returned to `false` for subsequent
-runs.
+When all targets share the same initial SSH password, store the following
+variable in the encrypted `vars-vault.yaml`. The value below is only a
+placeholder; never create a plaintext vars file or commit the real password.
+
+```yaml
+vault_ssh_root_password: "common-initial-SSH-password"
+```
+
+`vars-vault.yaml` is not supplied by the repository and is ignored by Git. Each
+user must create it before the first run. The default Vault master password
+file is `~/.ansible_vault_pass`; restrict both files to mode `0600`.
+
+```bash
+ansible-vault create \
+  --vault-password-file ~/.ansible_vault_pass \
+  vars-vault.yaml
+chmod 600 vars-vault.yaml ~/.ansible_vault_pass
+```
+
+Use the following command for later changes:
+
+```bash
+ansible-vault edit \
+  --vault-password-file ~/.ansible_vault_pass \
+  vars-vault.yaml
+```
+
+`run.sh` automatically supplies `~/.ansible_vault_pass`. To use another path,
+set only the password-file path in the environment:
+
+```bash
+ANSIBLE_VAULT_PASSWORD_FILE=/secure/path/vault-pass ./run.sh
+```
+
+The first Play uses `sshpass -e ssh-copy-id` to deploy the public key to every
+inventory host non-interactively. The task uses `no_log` so the password is not
+printed. If the same key already exists in remote `authorized_keys`, the check
+built into `ssh-copy-id` prevents duplication. Password authentication adds
+the key only when it is different or missing. After initial deployment,
+`ssh_copy_id_enabled` can be returned to `false`. Do not use the common-password
+method when targets have different passwords or prohibit root password login;
+use host-specific vaulted variables or an existing SSH key instead.
+
+Do not commit either `vars-vault.yaml` or `~/.ansible_vault_pass`. `run.sh`
+stops with creation guidance if either required file is unavailable. No
+`vars-vault.example.yaml` is provided; this document is the source of truth for
+the required variable structure. If a plaintext password was committed, rotate
+it immediately and remove it from Git history.
 
 Edit `inventory.ini` for the target environment. Use the inventory host name as
 the host name and set its management IP with `ansible_host`. Host-specific

@@ -29,9 +29,18 @@
       - ssh_private_key.stat.isreg
       - ssh_public_key.stat.exists
       - ssh_public_key.stat.isreg
+      - vault_ssh_root_password is defined
+      - vault_ssh_root_password | length > 0
     fail_msg: >-
-      SSH key files were not found. Check ssh_copy_id_identity_file and
-      ssh_copy_id_public_key_file in vars-common.yaml.
+      SSH key files or vault_ssh_root_password were not found. Check the SSH
+      key paths in vars-common.yaml and the encrypted variable in
+      vars-vault.yaml.
+  when: ssh_copy_id_enabled | bool
+
+- name: Check sshpass command
+  ansible.builtin.command:
+    argv: [sshpass, -V]
+  changed_when: false
   when: ssh_copy_id_enabled | bool
 
 - name: Apply selected private key to inventory hosts
@@ -47,6 +56,8 @@
 - name: Ensure selected SSH public key is installed on every host
   ansible.builtin.command:
     argv:
+      - sshpass
+      - -e
       - ssh-copy-id
       - -i
       - "{{ ssh_copy_id_public_key_file }}"
@@ -57,10 +68,13 @@
       - -p
       - "{{ hostvars[item].ansible_port | default(22) | string }}"
       - "{{ hostvars[item].ansible_user | default('root') }}@{{ hostvars[item].ansible_host }}"
+  environment:
+    SSHPASS: "{{ vault_ssh_root_password }}"
   loop: "{{ groups['tailscale'] }}"
   loop_control:
     label: "{{ item }} ({{ hostvars[item].ansible_host }})"
   register: ssh_copy_id_results
+  no_log: true
   when: ssh_copy_id_enabled | bool
   changed_when: >-
     'All keys were skipped' not in
