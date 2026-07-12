@@ -54,7 +54,9 @@
     - headplane
   roles:
     - role: os_compat
+      when: headplane_enabled | bool
     - role: headplane
+      when: headplane_enabled | bool
       tags:
         - headplane
 

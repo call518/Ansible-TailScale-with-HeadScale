@@ -590,17 +590,36 @@ SQLite file ownership.
 
 ## Headplane Admin UI
 
-After Headscale installation, the Headplane role installs Docker CE on
+Headplane is an optional convenience Web UI, not a Headscale runtime
+requirement. Users, nodes, routes, and policy can all be managed with the
+Headscale CLI alone. The default `headplane_enabled: true` includes this
+convenience feature. After Headscale installation, the Headplane role installs Docker CE on
 `tailscale-head` and runs the pinned `ghcr.io/tale/headplane:0.7.0` image in
 Limited Mode. It does not change the existing systemd Headscale service or TCP
 443 listener, and it does not mount the Docker socket, Headscale DB, or TLS
 private keys into the container.
 
 ```yaml
+headplane_enabled: true
 headplane_version: "0.7.0"
 headplane_port: 3000
 headplane_config_dir: /opt/headplane
 headplane_data_volume: headplane-data
+```
+
+To skip Headplane installation, set the following in `vars-common.yaml`:
+
+```yaml
+headplane_enabled: false
+```
+
+`false` only skips the Docker CE and Headplane roles during that Ansible run.
+It does not stop or remove an existing container, volume, or configuration.
+Existing installations are removed only when an operator deliberately runs
+the explicit removal commands below. A one-time override is also available:
+
+```bash
+./run.sh -e headplane_enabled=false
 ```
 
 The role creates the cookie secret once and passes the public Headscale Root CA
@@ -613,11 +632,19 @@ and is not stored in Ansible or the configuration file.
 ./run.sh --tags headplane
 ```
 
+This command performs installation only when `headplane_enabled: true`.
+
 Access and verify Headplane:
 
 ```text
 http://192.168.156.100:3000/admin/
 ```
+
+After deployment, Headplane provides a Web UI for viewing and managing the
+users, nodes, addresses, and connection state registered with the on-premises
+Headscale server.
+
+![Headplane Web UI showing on-premises Headscale nodes](images/screenshot-01-headplane-webui.png)
 
 ```bash
 docker inspect headplane \

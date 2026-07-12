@@ -140,6 +140,7 @@ headscale_ca_dn:
   common_name: Headscale Lab Root CA
 
 # Headplane (Headscale 관리 UI, Docker Limited Mode)
+headplane_enabled: true
 headplane_version: "0.7.0"
 headplane_image: "ghcr.io/tale/headplane:{{ headplane_version }}"
 headplane_container_name: headplane
