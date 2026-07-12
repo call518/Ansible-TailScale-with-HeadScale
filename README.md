@@ -8,6 +8,13 @@ Site-to-Site Layer 3 VPN. It automates Embedded DERP, subnet route approval, IP
 forwarding, and MSS Clamping. Test endpoints at each Site and NetworkManager NIC
 connection profiles are outside its management scope.
 
+Tailscale and Headscale are not limited to Site-to-Site VPNs. Their basic
+device VPN works more simply: install Tailscale on each PC, server, or mobile
+device and register it with Headscale to communicate directly over its Tailnet
+IP, without advertising subnet routes or deploying a subnet router. This
+project focuses on automating the additional Site-to-Site Layer 3 routing
+configuration; ordinary devices can still join and use the same Tailnet.
+
 ## Validated Environment and Requirements
 
 The following environment was used to build and validate the current
