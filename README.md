@@ -450,13 +450,18 @@ that order.
 The Site-to-Site data path can be validated without physical Site clients by
 creating a temporary Linux network namespace and veth on each Router. Add only
 the Routers to validate to the optional `[site_test_endpoints]` group and set a
-host-specific `site_test_ip`.
+host-specific `site_test_ip` and the Router's Site address as
+`site_test_gateway`.
 
 ```ini
 [site_test_endpoints]
-tailscale-01 site_test_ip=10.10.10.201
-tailscale-02 site_test_ip=10.10.20.202
+tailscale-01 site_test_ip=10.10.10.126 site_test_gateway=10.10.10.127
+tailscale-02 site_test_ip=10.10.20.126 site_test_gateway=10.10.20.127
 ```
+
+The Role assigns the Site subnet address and prefix directly to `veth-ns`, sets
+`site_test_gateway` as its default gateway, and adds only a `/32` return route
+to the test IP on the Router. The test IP must be unused on that Site.
 
 If the test is not required or test IPs cannot be allocated, leave the group
 empty or remove it. This does not affect installation or operation of the

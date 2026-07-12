@@ -8,10 +8,17 @@
     that:
       - site_test_ip is defined
       - site_test_ip | length > 0
+      - site_test_gateway is defined
+      - site_test_gateway | length > 0
+      - site_nic is defined
+      - site_nic | length > 0
+      - site_cidr is defined
+      - "'/' in site_cidr"
       - groups['site_test_endpoints'] | default([]) | length > 1
     fail_msg: >-
-      Each site_test_endpoints host requires site_test_ip in inventory.ini
-      and validation requires at least two test endpoints.
+      Each site_test_endpoints host requires site_test_ip and site_test_gateway,
+      and its tailscale_routers entry requires site_nic and site_cidr.
+      Validation also requires at least two test endpoints.
 
 - name: Install temporary Site endpoint setup script
   ansible.builtin.template:
@@ -30,22 +37,14 @@
     - name: Test remote Site endpoints
       ansible.builtin.command:
         argv:
-          - ip
-          - netns
-          - exec
-          - "{{ tailscale_site_test_namespace }}"
-          - ping
-          - -c
-          - "4"
-          - -W
-          - "2"
+          - /usr/local/sbin/tailscale-site-test-endpoint
+          - probe
           - "{{ hostvars[item].site_test_ip }}"
       loop: >-
         {{ groups['site_test_endpoints'] | default([]) |
            difference([inventory_hostname]) }}
       loop_control:
         label: "{{ inventory_hostname }} -> {{ item }} ({{ hostvars[item].site_test_ip }})"
-      register: site_test_ping
       changed_when: false
   always:
     - name: Remove temporary Site endpoint after validation

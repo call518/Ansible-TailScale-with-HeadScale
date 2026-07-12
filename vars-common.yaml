@@ -167,6 +167,3 @@ tailscale_site_test_cleanup_after_validation: false
 tailscale_site_test_namespace: ns-test
 tailscale_site_test_veth_host: veth-host
 tailscale_site_test_veth_namespace: veth-ns
-tailscale_site_test_transit_host: 169.254.100.1
-tailscale_site_test_transit_namespace: 169.254.100.2
-tailscale_site_test_transit_prefix: 30

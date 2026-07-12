@@ -3,11 +3,11 @@ set -euo pipefail
 
 NS={{ tailscale_site_test_namespace | quote }}
 TEST_IP={{ site_test_ip | quote }}
+GATEWAY={{ site_test_gateway | quote }}
+SITE_NIC={{ site_nic | quote }}
+SITE_PREFIX={{ site_cidr.split('/')[1] | quote }}
 VETH_HOST={{ tailscale_site_test_veth_host | quote }}
 VETH_NS={{ tailscale_site_test_veth_namespace | quote }}
-TRANSIT_HOST={{ tailscale_site_test_transit_host | quote }}
-TRANSIT_NS={{ tailscale_site_test_transit_namespace | quote }}
-TRANSIT_PREFIX={{ tailscale_site_test_transit_prefix }}
 
 cleanup() {
     ip netns del "$NS" 2>/dev/null || true
@@ -17,22 +17,44 @@ cleanup() {
 setup() {
     cleanup
 
+    if [[ -z "$(ip -4 -o addr show dev "$SITE_NIC" to "$GATEWAY/32")" ]]; then
+        echo "Gateway $GATEWAY is not configured on $SITE_NIC" >&2
+        exit 1
+    fi
+
     ip netns add "$NS"
     ip link add "$VETH_HOST" type veth peer name "$VETH_NS"
     ip link set "$VETH_NS" netns "$NS"
 
-    ip addr add "$TRANSIT_HOST/$TRANSIT_PREFIX" dev "$VETH_HOST"
     ip link set "$VETH_HOST" up
 
     ip netns exec "$NS" ip link set lo up
     ip netns exec "$NS" ip link set "$VETH_NS" up
+    ip netns exec "$NS" ip addr add "$TEST_IP/$SITE_PREFIX" dev "$VETH_NS"
     ip netns exec "$NS" \
-        ip addr add "$TRANSIT_NS/$TRANSIT_PREFIX" dev "$VETH_NS"
-    ip netns exec "$NS" ip addr add "$TEST_IP/32" dev lo
-    ip netns exec "$NS" \
-        ip route add default via "$TRANSIT_HOST" dev "$VETH_NS" src "$TEST_IP"
+        ip route add default via "$GATEWAY" dev "$VETH_NS"
 
-    ip route replace "$TEST_IP/32" via "$TRANSIT_NS" dev "$VETH_HOST"
+    ip route replace "$TEST_IP/32" dev "$VETH_HOST"
+
+    if ! ip netns exec "$NS" ping -c 1 -W 2 "$GATEWAY" >/dev/null; then
+        echo "Namespace $NS cannot reach gateway $GATEWAY via $VETH_NS" >&2
+        echo "Check the host ARP settings (arp_ignore and arp_filter)." >&2
+        cleanup
+        exit 1
+    fi
+}
+
+probe() {
+    local target=${1:?"Missing ping target"}
+
+    for ((attempt = 1; attempt <= 300; attempt++)); do
+        if ip netns exec "$NS" ping -c 1 -W 1 "$target" >/dev/null; then
+            exit 0
+        fi
+    done
+
+    echo "No ping response from $target after 300 seconds" >&2
+    exit 1
 }
 
 case "${1:-setup}" in
@@ -42,8 +64,11 @@ case "${1:-setup}" in
     cleanup)
         cleanup
         ;;
+    probe)
+        probe "${2:-}"
+        ;;
     *)
-        echo "Usage: $0 {setup|cleanup}" >&2
+        echo "Usage: $0 {setup|cleanup|probe TARGET}" >&2
         exit 2
         ;;
 esac
