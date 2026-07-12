@@ -19,6 +19,7 @@
   gather_facts: true
   vars_files:
     - vars-common.yaml
+    - vars-vault.yaml
   tags:
     - common
   roles:
@@ -33,6 +34,7 @@
   gather_facts: true
   vars_files:
     - vars-common.yaml
+    - vars-vault.yaml
   tags:
     - headscale
   roles:
@@ -47,6 +49,7 @@
   gather_facts: true
   vars_files:
     - vars-common.yaml
+    - vars-vault.yaml
   tags:
     - headplane
   roles:
@@ -62,6 +65,7 @@
   serial: 1
   vars_files:
     - vars-common.yaml
+    - vars-vault.yaml
   tags:
     - tailscale_router
   roles:
@@ -76,6 +80,7 @@
   gather_facts: false
   vars_files:
     - vars-common.yaml
+    - vars-vault.yaml
   tags:
     - route_approval
   tasks:
@@ -132,6 +137,7 @@
   gather_facts: false
   vars_files:
     - vars-common.yaml
+    - vars-vault.yaml
   tags:
     - site_test_endpoint
   roles:

@@ -127,12 +127,26 @@ flowchart TB
 
 ## 실행 전 준비
 
-제어 노드에서 세 노드에 SSH 접속 및 `become`이 가능해야 한다. 현재 inventory의
+제어 노드에서 모든 관리 대상 노드에 SSH 접속 및 `become`이 가능해야 한다. 현재 inventory의
 기본값은 `root` 접속이다. 다른 계정이나 SSH 키를 쓰면 `inventory.ini`의
 `ansible_user`, `ansible_port` 및 필요한 접속 변수를 조정한다.
 Ubuntu 설치 이미지처럼 root SSH 로그인을 기본 허용하지 않는 환경에서는 각 호스트에
-`ansible_user=ubuntu`를 지정하고, sudo 암호가 필요하면 실행 시 `--ask-become-pass`를
-전달한다. 호스트 변수는 `[tailscale:vars]`의 `ansible_user=root`보다 우선한다.
+`ansible_user=ubuntu`처럼 실제 SSH 계정을 지정한다. `[all:vars]`는 `sudo`를 통해
+root로 권한을 상승하도록 명시하며, 호스트 변수는 이 공통 접속 변수보다 우선한다.
+`ansible_user=root`이면 권한 상승 설정이 있어도 기존 배포 흐름에 문제가 없다.
+
+비-root SSH 계정의 sudo 인증은 환경에 따라 다음 세 방식 중 하나를 사용한다.
+
+1. 대상 시스템에서 해당 계정 또는 `wheel`/`sudo` 그룹에 필요한 sudo 권한을 미리
+   부여한다. 완전 비대화식 배포가 필요하면 필요한 명령에 적절한 `NOPASSWD` 정책도
+   사전에 구성한다.
+2. sudo가 비밀번호를 요구하면 실행할 때 `./run.sh --ask-become-pass`로 한 번 입력한다.
+3. 자동 실행이 필요하면 `vars-vault.yaml`에 별도의
+   `vault_ansible_become_password`를 저장하고, 해당 호스트나 `[all:vars]`에
+   `ansible_become_password={{ vault_ansible_become_password }}`를 설정한다.
+
+SSH 로그인 비밀번호인 `vault_ssh_root_password`와 sudo 비밀번호는 역할이 다르므로
+같은 값이더라도 별도 변수로 관리한다.
 
 Passwordless SSH가 준비되지 않은 환경에서는 `vars-common.yaml`에서 다음 값을
 설정한다. 개인키와 같은 이름의 `.pub` 공개키가 있어야 한다.
@@ -149,6 +163,8 @@ Git에 기록하면 안 된다.
 
 ```yaml
 vault_ssh_root_password: "초기-공통-SSH-비밀번호"
+# 비-root SSH 계정이 sudo 비밀번호를 요구할 때만 추가
+vault_ansible_become_password: "sudo-비밀번호"
 ```
 
 `vars-vault.yaml`은 저장소에 제공되지 않으며 `.gitignore` 대상이다. 최초 실행 전에
@@ -206,7 +222,20 @@ site-b.example.com ansible_host=192.168.156.102 host_alias=site-b site_nic=ens22
 [site_test_endpoints]
 site-a.example.com site_test_ip=10.10.10.201
 site-b.example.com site_test_ip=10.10.20.202
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_user=root
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+ansible_become=true
+ansible_become_user=root
+ansible_become_method=sudo
 ```
+
+`[all:vars]`는 모든 관리 대상에 `/usr/bin/python3`, 기본 SSH 계정과 개인키 및
+`sudo` 기반 root 권한 상승을 공통 적용한다. 다른 계정이나 키를 사용하는 호스트는
+해당 호스트 행에서 값을 재정의한다. 지원 대상인 Rocky Linux 10과 Ubuntu 26.04에는
+`/usr/bin/python3`가 존재한다.
 
 NIC 주소 자체는 이미 구성된 상태를 전제로 하며 이 플레이북이 NetworkManager
 연결 프로파일을 변경하지 않는다. `site_nic`은 각 Site LAN NIC 이름,

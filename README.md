@@ -132,14 +132,31 @@ SSH.
 
 ## Before You Run
 
-The control node must be able to connect to all three nodes over SSH and use
+The control node must be able to connect to every managed node over SSH and use
 `become`. The current inventory defaults to the `root` account. To use a
 different account or SSH key, adjust `ansible_user`, `ansible_port`, and any
 required connection variables in `inventory.ini`. On environments such as
-Ubuntu images that do not allow root SSH login by default, set
-`ansible_user=ubuntu` on each host and pass `--ask-become-pass` when a sudo
-password is required. Host variables take precedence over
-`ansible_user=root` in `[tailscale:vars]`.
+Ubuntu images that do not allow root SSH login by default, set the actual SSH
+account, such as `ansible_user=ubuntu`, on each host. `[all:vars]` explicitly
+uses `sudo` to become root, and host variables take precedence over these
+common connection variables. Keeping `ansible_user=root` works normally even
+with the privilege-escalation settings present.
+
+Use one of these three sudo authentication methods for a non-root SSH account:
+
+1. Preconfigure the required sudo authorization for the account or its
+   `wheel`/`sudo` group. For fully unattended deployment, also configure an
+   appropriately scoped `NOPASSWD` policy in advance.
+2. When sudo requires a password, enter it once with
+   `./run.sh --ask-become-pass`.
+3. For unattended execution, store a separate
+   `vault_ansible_become_password` in `vars-vault.yaml`, then set
+   `ansible_become_password={{ vault_ansible_become_password }}` for the host or
+   in `[all:vars]`.
+
+The SSH login password in `vault_ssh_root_password` and the sudo password serve
+different purposes, so keep them as separate variables even when their values
+happen to match.
 
 If passwordless SSH is not yet configured, set the following values in
 `vars-common.yaml`. A `.pub` public key matching the private key name must
@@ -157,6 +174,8 @@ placeholder; never create a plaintext vars file or commit the real password.
 
 ```yaml
 vault_ssh_root_password: "common-initial-SSH-password"
+# Add only when a non-root SSH account requires a sudo password
+vault_ansible_become_password: "sudo-password"
 ```
 
 `vars-vault.yaml` is not supplied by the repository and is ignored by Git. Each
@@ -216,7 +235,21 @@ site-b.example.com ansible_host=192.168.156.102 host_alias=site-b site_nic=ens22
 [site_test_endpoints]
 site-a.example.com site_test_ip=10.10.10.201
 site-b.example.com site_test_ip=10.10.20.202
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_user=root
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+ansible_become=true
+ansible_become_user=root
+ansible_become_method=sudo
 ```
+
+`[all:vars]` applies `/usr/bin/python3`, the default SSH account and private
+key, and sudo-based root privilege escalation to every managed node. Override
+these values on an individual host line when it uses another account or key.
+`/usr/bin/python3` exists on the supported Rocky Linux 10 and Ubuntu 26.04
+targets.
 
 NIC addresses are expected to be configured already; this playbook does not
 modify NetworkManager connection profiles. `site_nic` is the Site LAN NIC name
