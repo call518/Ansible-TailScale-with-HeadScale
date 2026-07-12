@@ -445,6 +445,30 @@ Do not use `--limit` for the first complete deployment. Headscale
 configuration, router registration, and advertised route approval must run in
 that order.
 
+Test ACL/tag management is enabled by default. After registration, Ansible
+resolves the actual Headscale node IDs and assigns each router's logical region
+tag from `headscale_router_tags`. In the default topology, `tailscale-01/02`
+use `tag:region-a` and `tailscale-03/04` use `tag:region-b`.
+
+```yaml
+headscale_test_acl_tags_enabled: true
+headscale_router_tags:
+  tailscale-01: tag:region-a
+  tailscale-02: tag:region-a
+  tailscale-03: tag:region-b
+  tailscale-04: tag:region-b
+```
+
+Set `headscale_test_acl_tags_enabled: false` when this management is not needed.
+
+Applying a tag changes the node owner from `site2site` to the special
+`tagged-devices` user, as required by the Headscale identity model. In database
+mode, changing the variable back to `false` preserves the stored policy and
+node tags and skips subsequent ACL merges and tag assignments. In file mode,
+the template is authoritative, so the next Headscale role run omits the test
+`tagOwners` from the policy file. Existing node tags are never removed
+automatically in either mode.
+
 ## Optional netns Test Endpoint Validation
 
 The Site-to-Site data path can be validated without physical Site clients by
@@ -478,6 +502,13 @@ Site endpoint. The default is `false`, which does not create the test
 environment. To remove it automatically after validation, add the following
 option.
 
+Immediately after creating the netns and veth, the first ping response may be
+delayed while ARP/neighbor discovery converges. For each remote endpoint, the
+Role sends a one-second ping probe for up to 300 seconds and succeeds as soon
+as the first response arrives. Healthy paths therefore finish immediately;
+only a path with slow initial discovery waits. A path fails only if no response
+arrives within 300 seconds.
+
 ```bash
 ./run.sh --tags site_test_endpoint \
   -e tailscale_site_test_enabled=true \
@@ -490,6 +521,7 @@ Router as follows.
 ```bash
 ip netns exec ns-test ping -c 4 <remote-site_test_ip>
 ip netns exec ns-test traceroute <remote-site_test_ip>
+/usr/local/sbin/tailscale-site-test-endpoint probe <remote-site_test_ip>
 /usr/local/sbin/tailscale-site-test-endpoint cleanup
 ```
 
@@ -550,6 +582,15 @@ set` only when `headscale policy get` returns `acl policy not found`. Any
 stored policy, including `{}` or an empty `grants` policy, is preserved as a
 valid operator policy, so later Ansible runs do not overwrite Headplane/API
 changes.
+
+When `headscale_test_acl_tags_enabled: true`, the default template defines
+`site2site@` as the owner of `tag:region-a` and `tag:region-b`. The `site2site`
+user is created before the policy is initially validated and stored. In
+database mode, Ansible reads the current policy before
+tagging routers and merges only a missing tag or `site2site@` owner into
+`tagOwners`. Existing owners and all other sections, such as `grants` and
+`groups`, are preserved; `headscale policy set` is skipped when no merge is
+needed. Set the variable to `false` to skip this merge.
 
 To permanently select file mode, change the variable and apply the role:
 

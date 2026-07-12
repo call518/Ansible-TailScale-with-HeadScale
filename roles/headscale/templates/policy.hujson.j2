@@ -1,4 +1,11 @@
 {
+{% if headscale_test_acl_tags_enabled | bool %}
+  "tagOwners": {
+{% for tag in headscale_router_tags.values() | unique %}
+    "{{ tag }}": ["{{ headscale_user_name }}@"]{% if not loop.last %},{% endif %}
+{% endfor %}
+  },
+{% endif %}
   "grants": [
     {
       "src": ["*"],

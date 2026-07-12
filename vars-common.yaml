@@ -112,6 +112,12 @@ headscale_log_format: text
 # file: policy.hujson.j2를 매 실행마다 배포, database: Headplane/API에서 SQLite 정책 관리
 headscale_policy_mode: database
 headscale_policy_path: "{{ headscale_config_dir }}/policy.hujson"
+headscale_test_acl_tags_enabled: true
+headscale_router_tags:
+  tailscale-01: tag:region-a
+  tailscale-02: tag:region-a
+  tailscale-03: tag:region-b
+  tailscale-04: tag:region-b
 headscale_magic_dns: true
 headscale_dns_domain: tailnet.internal
 headscale_override_local_dns: false
