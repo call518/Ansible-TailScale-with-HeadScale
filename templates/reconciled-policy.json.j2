@@ -1,0 +1,26 @@
+{% macro render_json(value, level=0) -%}
+{% if value is mapping -%}
+{{ '{\n' -}}
+{% set ns = namespace(keys=[]) -%}
+{% for key in ['src', 'dst', 'ip'] if key in value -%}
+{% set ns.keys = ns.keys + [key] -%}
+{% endfor -%}
+{% for key in value.keys() if key not in ns.keys -%}
+{% set ns.keys = ns.keys + [key] -%}
+{% endfor -%}
+{% for key in ns.keys -%}
+{% set item = value[key] -%}
+{{ '  ' * (level + 1) -}}{{ key | to_json }}: {{ render_json(item, level + 1) -}}{{ ',' if not loop.last else '' }}{{ '\n' -}}
+{% endfor -%}
+{{ '  ' * level -}}{{ '}' -}}
+{% elif value is sequence and value is not string and value | select('mapping') | list | length > 0 -%}
+{{ '[\n' -}}
+{% for item in value -%}
+{{ '  ' * (level + 1) -}}{{ render_json(item, level + 1) -}}{{ ',' if not loop.last else '' }}{{ '\n' -}}
+{% endfor -%}
+{{ '  ' * level -}}{{ ']' -}}
+{% else -%}
+{{ value | to_json -}}
+{% endif -%}
+{%- endmacro %}
+{{ render_json(reconciled_headscale_policy) }}

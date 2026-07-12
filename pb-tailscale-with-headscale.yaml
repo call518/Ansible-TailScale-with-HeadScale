@@ -27,7 +27,7 @@
     ansible_become: false
     ansible_password: >-
       {{ (vault_ssh_passwords | default({})).get(
-           inventory_hostname, vault_ssh_root_password | default('')) }}
+           inventory_hostname, vault_ssh_common_password | default('')) }}
     ansible_ssh_timeout: "{{ ssh_bootstrap_connect_timeout }}"
   tags:
     - ssh_bootstrap
@@ -234,11 +234,11 @@
       loop: "{{ groups['tailscale_routers'] }}"
       loop_control:
         label: "{{ item }}"
-      when: headscale_test_acl_tags_enabled | bool
+      when: headscale_router_tags_enabled | bool
 
     - name: Reconcile managed tag owners in database policy
       when:
-        - headscale_test_acl_tags_enabled | bool
+        - headscale_router_tags_enabled | bool
         - headscale_policy_mode == 'database'
       block:
         - name: Read current Headscale database policy
@@ -275,14 +275,32 @@
           loop_control:
             label: "{{ item }}"
 
+        - name: Place managed tag owners first in policy output
+          ansible.builtin.set_fact:
+            reconciled_headscale_policy: >-
+              {{ {'tagOwners': reconciled_headscale_policy.tagOwners} |
+                 combine(reconciled_headscale_policy) }}
+
         - name: Write reconciled Headscale policy
-          ansible.builtin.copy:
-            content: "{{ reconciled_headscale_policy | to_nice_json }}\n"
+          ansible.builtin.template:
+            src: reconciled-policy.json.j2
             dest: /run/headscale/ansible-policy.json
             owner: root
             group: root
             mode: "0600"
-          when: reconciled_headscale_policy != current_headscale_policy
+          changed_when: false
+
+        - name: Read rendered Headscale policy
+          ansible.builtin.slurp:
+            src: /run/headscale/ansible-policy.json
+          register: rendered_headscale_policy_file
+
+        - name: Determine whether Headscale policy needs reconciliation
+          ansible.builtin.set_fact:
+            headscale_policy_reconciliation_required: >-
+              {{ reconciled_headscale_policy != current_headscale_policy or
+                 (rendered_headscale_policy_file.content | b64decode | trim) !=
+                 (current_headscale_policy_command.stdout | trim) }}
 
         - name: Validate reconciled Headscale policy
           ansible.builtin.command:
@@ -292,7 +310,7 @@
               - check
               - --file
               - /run/headscale/ansible-policy.json
-          when: reconciled_headscale_policy != current_headscale_policy
+          when: headscale_policy_reconciliation_required | bool
           changed_when: false
 
         - name: Store reconciled Headscale policy
@@ -303,7 +321,7 @@
               - set
               - --file
               - /run/headscale/ansible-policy.json
-          when: reconciled_headscale_policy != current_headscale_policy
+          when: headscale_policy_reconciliation_required | bool
           changed_when: true
       always:
         - name: Remove temporary reconciled policy
@@ -326,7 +344,7 @@
         label: >-
           {{ item }} -> {{ headscale_router_tags[item] }}
       changed_when: true
-      when: headscale_test_acl_tags_enabled | bool
+      when: headscale_router_tags_enabled | bool
 
     - name: Approve each router's advertised route
       ansible.builtin.command:

@@ -155,7 +155,7 @@ Use one of these three sudo authentication methods for a non-root SSH account:
    `ansible_become_password={{ vault_ansible_become_password }}` for the host or
    in `[all:vars]`.
 
-The SSH login password in `vault_ssh_root_password` and the sudo password serve
+The SSH login password in `vault_ssh_common_password` and the sudo password serve
 different purposes, so keep them as separate variables even when their values
 happen to match.
 
@@ -175,7 +175,7 @@ in encrypted `vars-vault.yaml`. The value below is only a placeholder; never
 create a plaintext vars file or commit the real password.
 
 ```yaml
-vault_ssh_root_password: "common-initial-SSH-password"
+vault_ssh_common_password: "common-initial-SSH-password"
 # Add only when a non-root SSH account requires a sudo password
 vault_ansible_become_password: "sudo-password"
 ```
@@ -196,7 +196,7 @@ When both the common variable and map are defined, map entries take precedence,
 so only exceptional hosts need overrides:
 
 ```yaml
-vault_ssh_root_password: "common-password-for-most-hosts"
+vault_ssh_common_password: "common-password-for-most-hosts"
 vault_ssh_passwords:
   tailscale-04: "TAILSCALE04-exception-password"
 ```
@@ -204,7 +204,7 @@ vault_ssh_passwords:
 Map keys must exactly match hostnames in `inventory.ini`. A key outside the
 `tailscale` group is treated as a typo and stops deployment. Each host selects
 its password in this order: `vault_ssh_passwords[hostname]`,
-`vault_ssh_root_password`. If neither exists, the role names that host and
+`vault_ssh_common_password`. If neither exists, the role names that host and
 fails before opening its SSH connection. Interactive password entry is not
 supported.
 
@@ -376,6 +376,14 @@ to the remote Site CIDR through that router. If direct UDP connectivity between
 routers is unavailable, encrypted traffic is relayed through Headscale's
 Embedded DERP.
 
+With this setting, ACL source matching uses the Site endpoint's original IP;
+a tag assigned to the Router does not represent the subnet behind it. For
+example, `src: ["tag:region-a"]` does not include endpoints in
+`10.10.10.0/24`. Site-to-Site policies that preserve source addresses with
+`tailscale_snat_subnet_routes: false` must use the actual Site CIDRs in `src`
+and `dst`. Router tags remain useful for access to the Router itself, role
+identification, and automatic route approval.
+
 ## Running the Playbook
 
 ```bash
@@ -451,7 +459,7 @@ tag from `headscale_router_tags`. In the default topology, `tailscale-01/02`
 use `tag:region-a` and `tailscale-03/04` use `tag:region-b`.
 
 ```yaml
-headscale_test_acl_tags_enabled: true
+headscale_router_tags_enabled: true
 headscale_router_tags:
   tailscale-01: tag:region-a
   tailscale-02: tag:region-a
@@ -459,7 +467,7 @@ headscale_router_tags:
   tailscale-04: tag:region-b
 ```
 
-Set `headscale_test_acl_tags_enabled: false` when this management is not needed.
+Set `headscale_router_tags_enabled: false` when this management is not needed.
 
 Applying a tag changes the node owner from `site2site` to the special
 `tagged-devices` user, as required by the Headscale identity model. In database
@@ -498,9 +506,9 @@ Run the validation after the complete installation and route approval.
 ```
 
 The Role creates a netns on each Router and automatically pings every other
-Site endpoint. The default is `false`, which does not create the test
-environment. To remove it automatically after validation, add the following
-option.
+Site endpoint. The default `true` creates the test environment; set
+`tailscale_site_test_enabled: false` to skip it. To remove the environment
+automatically after validation, add the following option.
 
 Immediately after creating the netns and veth, the first ping response may be
 delayed while ARP/neighbor discovery converges. For each remote endpoint, the
@@ -583,7 +591,7 @@ stored policy, including `{}` or an empty `grants` policy, is preserved as a
 valid operator policy, so later Ansible runs do not overwrite Headplane/API
 changes.
 
-When `headscale_test_acl_tags_enabled: true`, the default template defines
+When `headscale_router_tags_enabled: true`, the default template defines
 `site2site@` as the owner of `tag:region-a` and `tag:region-b`. The `site2site`
 user is created before the policy is initially validated and stored. In
 database mode, Ansible reads the current policy before
@@ -591,6 +599,12 @@ tagging routers and merges only a missing tag or `site2site@` owner into
 `tagOwners`. Existing owners and all other sections, such as `grants` and
 `groups`, are preserved; `headscale policy set` is skipped when no merge is
 needed. Set the variable to `false` to skip this merge.
+
+When reconciliation is enabled in database mode, Ansible also normalizes the
+entire JSON representation: arrays of scalar values remain on one line, while
+arrays of objects stay indented across lines. The policy is validated and
+stored only when its content or normalized representation differs from the
+current database policy.
 
 To permanently select file mode, change the variable and apply the role:
 
@@ -915,3 +929,9 @@ inventory and `vars-common.yaml` on the next Playbook run. In particular,
 `tailscale logout` removes the current registration and requires
 reauthentication; do not run it unless recovering from a failure or retiring a
 node.
+
+## Variable Reference
+
+See [VARIABLES.md](VARIABLES.md) for the purpose and defaults of every setting
+in `vars-common.yaml`, the OS-specific vars files, and optional
+`vars-vault.yaml`.
