@@ -9,6 +9,10 @@ SITE_PREFIX={{ site_cidr.split('/')[1] | quote }}
 VETH_HOST={{ tailscale_site_test_veth_host | quote }}
 VETH_NS={{ tailscale_site_test_veth_namespace | quote }}
 
+usage() {
+    echo "Usage: $0 {setup|cleanup|probe TARGET}" >&2
+}
+
 cleanup() {
     ip netns del "$NS" 2>/dev/null || true
     ip link del "$VETH_HOST" 2>/dev/null || true
@@ -57,7 +61,7 @@ probe() {
     exit 1
 }
 
-case "${1:-setup}" in
+case "${1:-}" in
     setup)
         setup
         ;;
@@ -65,10 +69,14 @@ case "${1:-setup}" in
         cleanup
         ;;
     probe)
-        probe "${2:-}"
+        if [[ $# -ne 2 ]]; then
+            usage
+            exit 2
+        fi
+        probe "$2"
         ;;
     *)
-        echo "Usage: $0 {setup|cleanup|probe TARGET}" >&2
+        usage
         exit 2
         ;;
 esac
