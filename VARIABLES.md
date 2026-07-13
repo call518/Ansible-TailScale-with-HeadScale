@@ -102,6 +102,9 @@ Each host in the inventory `[headscale_tagged_nodes]` group defines
 `headscale_node_tags` as a non-empty list. These host-specific tags are the
 source for node assignment and policy `tagOwners`; multiple tags are supported.
 Tagged hosts managed by this Role must also belong to `[tailscale_routers]`.
+Each `[tailscale_routers]` host can set `exit_node=true` to request Exit Node
+advertisement; the effective value is forced to false unless that host's
+`tailscale_snat_subnet_routes` is also true.
 
 ### Internal CA and Headplane
 

@@ -189,3 +189,27 @@
   retries: 6
   delay: 5
   until: route_approval.rc == 0
+
+- name: Approve requested exit nodes
+  ansible.builtin.command:
+    argv:
+      - "{{ headscale_binary_path }}"
+      - nodes
+      - approve-routes
+      - --identifier
+      - "{{ headscale_router_node_ids[item] }}"
+      - --routes
+      - 0.0.0.0/0
+  loop: "{{ groups['tailscale_routers'] }}"
+  loop_control:
+    label: "{{ item }} -> exit node"
+  register: exit_node_approval
+  changed_when: "'already approved' not in (exit_node_approval.stdout | lower)"
+  retries: 6
+  delay: 5
+  until: exit_node_approval.rc == 0
+  when:
+    - hostvars[item].exit_node | default(false) | bool
+    - >-
+      (hostvars[item].tailscale_snat_subnet_routes |
+       default(tailscale_snat_subnet_routes)) | bool

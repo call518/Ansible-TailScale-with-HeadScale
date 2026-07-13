@@ -302,8 +302,8 @@ also assigned on the corresponding host line.
 my-head.example.com ansible_host=192.168.156.100 ansible_user=ubuntu host_alias=head cert_dns_sans='["my-head.example.com", "head"]' cert_ip_sans='["192.168.156.100"]'
 
 [tailscale_routers]
-site-a.example.com ansible_host=192.168.156.101 ansible_user=root host_alias=site-a mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.10.0/24
-site-b.example.com ansible_host=192.168.156.102 ansible_user=admin host_alias=site-b mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.20.0/24
+site-a.example.com ansible_host=192.168.156.101 ansible_user=root host_alias=site-a mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.10.0/24 exit_node=false
+site-b.example.com ansible_host=192.168.156.102 ansible_user=admin host_alias=site-b mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.20.0/24 exit_node=false
 
 [site_test_endpoints]
 site-a.example.com site_test_ip=10.10.10.201
@@ -513,6 +513,52 @@ The separate group keeps router connection and Site routing fields concise in
 `[tailscale_routers]`; Ansible merges both group declarations into the same
 host variables. The global `headscale_router_tags_enabled` switch remains in
 `vars-common.yaml`. Set it to `false` when this management is not needed.
+
+Each Router can optionally advertise itself as an Exit Node with its inventory
+`exit_node` value. It defaults to `false` when omitted.
+
+```ini
+[tailscale_routers]
+tailscale-01 ... exit_node=true tailscale_snat_subnet_routes=true
+tailscale-02 ... exit_node=false
+```
+
+The Role advertises and approves `0.0.0.0/0` only when both `exit_node` and the
+host's effective `tailscale_snat_subnet_routes` are `true`. A host-level SNAT
+value overrides `vars-common.yaml`, so a dedicated Exit Node can enable SNAT
+without changing other Routers. When SNAT is false, Ansible logs a warning and
+forces the Exit Node advertisement to false even if `exit_node=true`.
+
+> [!WARNING]
+> The official Tailscale documentation warns that combining an Exit Node with
+> a Subnet Router that has SNAT disabled can cause upstream packet drops. It
+> recommends separating the Subnet Router and Exit Node roles when subnet-route
+> SNAT must remain disabled. See the
+> [Subnet Router documentation](https://tailscale.com/docs/features/subnet-routers).
+
+Advertising and Headscale approval only make the Exit Node available. Each
+Tailscale client must explicitly select it, and a restrictive policy must grant
+the client access to `autogroup:internet`.
+
+```bash
+tailscale set --exit-node=tailscale-01
+```
+
+```json
+{
+  "grants": [
+    {
+      "src": ["tag:region-a", "tag:region-b"],
+      "dst": ["autogroup:internet"],
+      "ip": ["*"]
+    }
+  ]
+}
+```
+
+Refer to the [Tailscale Exit Node documentation](https://tailscale.com/docs/features/exit-nodes)
+and [Headscale route documentation](https://headscale.net/stable/ref/routes/)
+for client selection and route details.
 
 Tailscale SSH on managed routers is optional and disabled by default. Set
 `tailscale_ssh_enabled: true` in `vars-common.yaml` to enable it; the Role

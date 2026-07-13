@@ -277,8 +277,8 @@ SAN처럼 호스트마다 다른 값도 해당 호스트 행에 지정한다.
 my-head.example.com ansible_host=192.168.156.100 ansible_user=ubuntu host_alias=head cert_dns_sans='["my-head.example.com", "head"]' cert_ip_sans='["192.168.156.100"]'
 
 [tailscale_routers]
-site-a.example.com ansible_host=192.168.156.101 ansible_user=root host_alias=site-a mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.10.0/24
-site-b.example.com ansible_host=192.168.156.102 ansible_user=admin host_alias=site-b mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.20.0/24
+site-a.example.com ansible_host=192.168.156.101 ansible_user=root host_alias=site-a mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.10.0/24 exit_node=false
+site-b.example.com ansible_host=192.168.156.102 ansible_user=admin host_alias=site-b mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.20.0/24 exit_node=false
 
 [site_test_endpoints]
 site-a.example.com site_test_ip=10.10.10.201
@@ -469,6 +469,53 @@ tailscale-04 headscale_node_tags='["tag:region-b"]'
 간결하게 유지되고, Ansible은 두 그룹에 선언된 값을 동일 호스트의 변수로 병합한다.
 전체 기능 스위치인 `headscale_router_tags_enabled`는 `vars-common.yaml`에 유지한다.
 이 작업이 필요 없으면 값을 `false`로 설정한다.
+
+각 Router는 inventory의 `exit_node` 값으로 Exit Node 광고 여부를 선택할 수 있다.
+생략하면 기본값은 `false`다.
+
+```ini
+[tailscale_routers]
+tailscale-01 ... exit_node=true tailscale_snat_subnet_routes=true
+tailscale-02 ... exit_node=false
+```
+
+Role은 `exit_node`와 해당 호스트에 최종 적용되는
+`tailscale_snat_subnet_routes`가 모두 `true`일 때만 Exit Node를 광고하고
+`0.0.0.0/0`을 승인한다. 호스트별 SNAT 값은 `vars-common.yaml`보다 우선하므로 다른
+Router의 설정을 바꾸지 않고 전용 Exit Node에서만 SNAT을 활성화할 수 있다. SNAT이
+`false`이면 `exit_node=true`여도 Ansible이 경고를 출력하고 Exit Node 광고를
+강제로 비활성화한다.
+
+> [!WARNING]
+> Tailscale 공식 문서는 SNAT을 끈 Subnet Router와 Exit Node를 동일 노드에서 함께
+> 운용하면 upstream packet drop이 발생할 수 있다고 경고하며, subnet-route SNAT을
+> 꺼야 한다면 Subnet Router와 Exit Node 역할 분리를 권장한다. 자세한 내용은
+> [Subnet Router 공식 문서](https://tailscale.com/docs/features/subnet-routers)를
+> 참고한다.
+
+광고와 Headscale 승인은 Exit Node를 사용 가능한 상태로 만들 뿐이다. 각 Tailscale
+client가 직접 선택해야 하며, 제한적인 policy에서는 `autogroup:internet` 접근도
+허용해야 한다.
+
+```bash
+tailscale set --exit-node=tailscale-01
+```
+
+```json
+{
+  "grants": [
+    {
+      "src": ["tag:region-a", "tag:region-b"],
+      "dst": ["autogroup:internet"],
+      "ip": ["*"]
+    }
+  ]
+}
+```
+
+Client 선택과 route 세부사항은 [Tailscale Exit Node 공식
+문서](https://tailscale.com/docs/features/exit-nodes)와 [Headscale route
+문서](https://headscale.net/stable/ref/routes/)를 참고한다.
 
 관리 대상 Router의 Tailscale SSH는 선택 기능이며 기본적으로 비활성화된다.
 `vars-common.yaml`에서 `tailscale_ssh_enabled: true`로 설정하면 신규 Router와 이미

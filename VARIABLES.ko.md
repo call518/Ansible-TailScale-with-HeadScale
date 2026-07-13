@@ -114,6 +114,9 @@ Inventory의 `[headscale_tagged_nodes]` 그룹에 속한 각 호스트는 비어
 `headscale_node_tags` 목록을 정의한다. 이 호스트별 tag는 노드 할당과 policy
 `tagOwners`의 원본이며, 하나 이상의 tag를 지정할 수 있다. 이 Role이 tag를 관리할
 호스트는 `[tailscale_routers]`에도 속해야 한다.
+각 `[tailscale_routers]` 호스트는 `exit_node=true`로 Exit Node 광고를 요청할 수
+있다. 해당 호스트의 `tailscale_snat_subnet_routes`도 `true`일 때만 실제
+활성화하며, 그렇지 않으면 안전을 위해 `false`로 강제한다.
 
 ### 내부 CA
 

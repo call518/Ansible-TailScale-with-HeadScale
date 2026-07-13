@@ -228,6 +228,22 @@
   changed_when: false
   failed_when: false
 
+- name: Determine effective exit node advertisement
+  ansible.builtin.set_fact:
+    tailscale_exit_node_effective: >-
+      {{ (exit_node | default(false) | bool) and
+         (tailscale_snat_subnet_routes | bool) }}
+
+- name: Warn when exit node advertisement is suppressed
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: exit_node=true is ignored on {{ inventory_hostname }} because
+      tailscale_snat_subnet_routes=false. Tailscale recommends separating the
+      subnet-router and exit-node roles when subnet-route SNAT must be disabled.
+  when:
+    - exit_node | default(false) | bool
+    - not (tailscale_snat_subnet_routes | bool)
+
 - name: Determine whether registration is required
   ansible.builtin.set_fact:
     tailscale_registration_required: >-
@@ -297,6 +313,7 @@
       - "--advertise-routes={{ site_cidr }}"
       - "--accept-routes={{ tailscale_accept_routes | bool | lower }}"
       - "--snat-subnet-routes={{ tailscale_snat_subnet_routes | bool | lower }}"
+      - "--advertise-exit-node={{ tailscale_exit_node_effective | bool | lower }}"
       - "--accept-dns={{ tailscale_accept_dns | bool | lower }}"
       - "--ssh={{ tailscale_ssh_enabled | bool | lower }}"
   when: tailscale_registration_required | bool
@@ -313,6 +330,7 @@
       - "--advertise-routes={{ site_cidr }}"
       - "--accept-routes={{ tailscale_accept_routes | bool | lower }}"
       - "--snat-subnet-routes={{ tailscale_snat_subnet_routes | bool | lower }}"
+      - "--advertise-exit-node={{ tailscale_exit_node_effective | bool | lower }}"
       - "--accept-dns={{ tailscale_accept_dns | bool | lower }}"
       - "--ssh={{ tailscale_ssh_enabled | bool | lower }}"
   when: not (tailscale_registration_required | bool)
