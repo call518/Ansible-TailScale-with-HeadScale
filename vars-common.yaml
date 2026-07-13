@@ -161,6 +161,7 @@ tailscale_snat_subnet_routes: false
 tailscale_ssh_enabled: true
 tailscale_manage_ipv6_forwarding: true
 tailscale_manage_mss_clamping: true
+tailscale_site_public_internet_masquerade_enabled: true
 tailscale_interface: tailscale0
 
 # 선택적 Site-to-Site netns 검증

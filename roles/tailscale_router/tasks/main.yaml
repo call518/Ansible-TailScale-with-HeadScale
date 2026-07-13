@@ -6,7 +6,19 @@
       - site_nic | length > 0
       - site_cidr is defined
       - site_cidr | length > 0
-    fail_msg: "inventory.ini에서 각 라우터의 site_nic과 site_cidr를 지정해야 합니다."
+      - >-
+        not (tailscale_site_public_internet_masquerade_enabled | bool) or
+        (mgmt_nic | default('') | length > 0)
+      - >-
+        not (tailscale_site_public_internet_masquerade_enabled | bool) or
+        mgmt_nic != site_nic
+      - >-
+        not (tailscale_site_public_internet_masquerade_enabled | bool) or
+        mgmt_nic in (ansible_interfaces | default([]))
+    fail_msg: >-
+      Each router requires site_nic and site_cidr. When public internet
+      masquerading is enabled, mgmt_nic must be an existing interface distinct
+      from site_nic.
 
 - name: Read internal CA from Headscale host
   ansible.builtin.slurp:
@@ -73,11 +85,13 @@
     name: "{{ tailscale_package }}"
     state: present
 
-- name: Install iptables compatibility tools for MSS clamping
+- name: Install iptables compatibility tools
   ansible.builtin.package:
     name: iptables
     state: present
-  when: tailscale_manage_mss_clamping | bool
+  when: >-
+    tailscale_manage_mss_clamping | bool or
+    tailscale_site_public_internet_masquerade_enabled | bool
 
 - name: Configure packet forwarding
   ansible.builtin.template:
@@ -121,6 +135,50 @@
     state: started
     daemon_reload: true
   when: tailscale_manage_mss_clamping | bool
+
+- name: Install Site public internet masquerade script
+  ansible.builtin.template:
+    src: tailscale-site-public-internet-masquerade.sh.j2
+    dest: /usr/local/sbin/tailscale-site-public-internet-masquerade
+    owner: root
+    group: root
+    mode: "0755"
+  when: tailscale_site_public_internet_masquerade_enabled | bool
+  notify: Restart Site public internet masquerade
+
+- name: Install Site public internet masquerade systemd unit
+  ansible.builtin.template:
+    src: tailscale-site-public-internet-masquerade.service.j2
+    dest: /etc/systemd/system/tailscale-site-public-internet-masquerade.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: tailscale_site_public_internet_masquerade_enabled | bool
+  notify: Restart Site public internet masquerade
+
+- name: Enable and start Site public internet masquerade
+  ansible.builtin.systemd_service:
+    name: tailscale-site-public-internet-masquerade
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: tailscale_site_public_internet_masquerade_enabled | bool
+
+- name: Check existing Site public internet masquerade unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/tailscale-site-public-internet-masquerade.service
+  register: tailscale_site_public_internet_masquerade_unit
+  when: not (tailscale_site_public_internet_masquerade_enabled | bool)
+
+- name: Disable and stop Site public internet masquerade
+  ansible.builtin.systemd_service:
+    name: tailscale-site-public-internet-masquerade
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when:
+    - not (tailscale_site_public_internet_masquerade_enabled | bool)
+    - tailscale_site_public_internet_masquerade_unit.stat.exists
 
 - name: Check existing Tailscale MSS clamping unit
   ansible.builtin.stat:

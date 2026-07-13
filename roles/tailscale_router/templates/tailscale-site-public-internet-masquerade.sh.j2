@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IPTABLES=/usr/sbin/iptables
+CHAIN=ansible-site-nat
+SITE_CIDR={{ site_cidr | quote }}
+MGMT_NIC={{ mgmt_nic | quote }}
+
+remove_jump() {
+    while "$IPTABLES" --wait -t nat -C POSTROUTING -j "$CHAIN" 2>/dev/null; do
+        "$IPTABLES" --wait -t nat -D POSTROUTING -j "$CHAIN"
+    done
+}
+
+apply_rules() {
+    "$IPTABLES" --wait -t nat -N "$CHAIN" 2>/dev/null || true
+    "$IPTABLES" --wait -t nat -F "$CHAIN"
+    "$IPTABLES" --wait -t nat -A "$CHAIN" \
+        -s "$SITE_CIDR" -o "$MGMT_NIC" -j MASQUERADE
+
+    remove_jump
+    "$IPTABLES" --wait -t nat -A POSTROUTING -j "$CHAIN"
+}
+
+remove_rules() {
+    remove_jump
+    if "$IPTABLES" --wait -t nat -L "$CHAIN" >/dev/null 2>&1; then
+        "$IPTABLES" --wait -t nat -F "$CHAIN"
+        "$IPTABLES" --wait -t nat -X "$CHAIN"
+    fi
+}
+
+case "${1:-}" in
+    apply)
+        apply_rules
+        ;;
+    remove)
+        remove_rules
+        ;;
+    *)
+        echo "Usage: $0 {apply|remove}" >&2
+        exit 2
+        ;;
+esac

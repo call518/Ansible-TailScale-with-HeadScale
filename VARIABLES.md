@@ -131,6 +131,7 @@ Tagged hosts managed by this Role must also belong to `[tailscale_routers]`.
 | `tailscale_ssh_enabled` | `false` | Enable the Tailscale SSH server on managed routers |
 | `tailscale_manage_ipv6_forwarding` | `true` | Manage IPv6 forwarding sysctl |
 | `tailscale_manage_mss_clamping` | `true` | Manage persistent TCP MSS-clamping rules |
+| `tailscale_site_public_internet_masquerade_enabled` | `true` | Persistently masquerade each Site CIDR through its inventory `mgmt_nic`; set false when upstream NAT or return routing already exists |
 | `tailscale_interface` | `tailscale0` | Tailscale interface name |
 | `tailscale_site_test_enabled` | `true` | Run temporary netns Site-to-Site validation |
 | `tailscale_site_test_cleanup_after_validation` | `false` | Remove the netns/veth after validation |

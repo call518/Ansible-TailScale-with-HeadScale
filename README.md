@@ -139,7 +139,7 @@ SSH.
 | `pb-tailscale-with-headscale.yaml` | Top-level orchestration of host scopes, privileges, ordering, conditions, and Role calls |
 | `run.sh` | Selects the Vault password file and forwards user arguments to the Playbook |
 | `ansible.cfg` | Inventory, forks, SSH host-key checking, and other Ansible defaults |
-| `inventory.ini` | Headscale/router groups, management IPs, SSH users, Site NIC/CIDR, and netns test addresses |
+| `inventory.ini` | Headscale/router groups, management IPs, SSH users, management/Site NICs, Site CIDRs, and netns test addresses |
 | `vars-common.yaml` | Shared versions, paths, ports, and behavior settings |
 | `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml` | OS-specific packages, services, CA trust, and Tailscale repositories |
 | `vars-vault.yaml` | User-created, Git-ignored Vault file for SSH Bootstrap and optional sudo passwords |
@@ -149,7 +149,7 @@ SSH.
 | `roles/common` | Hostname, time sync, hosts, common packages, and optional firewalld settings |
 | `roles/headscale` | Internal CA/TLS, Headscale binary, config, policy seed, systemd, and user setup |
 | `roles/headplane` | Optional Docker CE and Headplane Limited Mode deployment |
-| `roles/tailscale_router` | CA trust, Tailscale installation/registration, forwarding, and MSS Clamping |
+| `roles/tailscale_router` | CA trust, Tailscale installation/registration, forwarding, MSS Clamping, and optional Site internet masquerading |
 | `roles/router_mgmt` | Router validation, DB policy tagOwner merge/JSON normalization, node tags, and subnet route approval |
 | `roles/site_test_endpoint` | Temporary netns/veth endpoints matching real Site networking and inter-Site ping validation |
 
@@ -294,7 +294,7 @@ it immediately and remove it from Git history.
 
 Edit `inventory.ini` for the target environment. Use the inventory host name as
 the host name and set its management IP with `ansible_host`. Host-specific
-values such as `host_alias`, `site_nic`, `site_cidr`, and certificate SANs are
+values such as `host_alias`, `mgmt_nic`, `site_nic`, `site_cidr`, and certificate SANs are
 also assigned on the corresponding host line.
 
 ```ini
@@ -302,8 +302,8 @@ also assigned on the corresponding host line.
 my-head.example.com ansible_host=192.168.156.100 ansible_user=ubuntu host_alias=head cert_dns_sans='["my-head.example.com", "head"]' cert_ip_sans='["192.168.156.100"]'
 
 [tailscale_routers]
-site-a.example.com ansible_host=192.168.156.101 ansible_user=root host_alias=site-a site_nic=ens224 site_cidr=10.10.10.0/24
-site-b.example.com ansible_host=192.168.156.102 ansible_user=admin host_alias=site-b site_nic=ens224 site_cidr=10.10.20.0/24
+site-a.example.com ansible_host=192.168.156.101 ansible_user=root host_alias=site-a mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.10.0/24
+site-b.example.com ansible_host=192.168.156.102 ansible_user=admin host_alias=site-b mgmt_nic=ens160 site_nic=ens224 site_cidr=10.10.20.0/24
 
 [site_test_endpoints]
 site-a.example.com site_test_ip=10.10.10.201
@@ -327,8 +327,9 @@ necessary. `/usr/bin/python3` exists on the supported Rocky Linux 10 and Ubuntu
 26.04 targets.
 
 NIC addresses are expected to be configured already; this playbook does not
-modify NetworkManager connection profiles. `site_nic` is the Site LAN NIC name
-on each router, and `site_cidr` is the LAN prefix advertised by that router.
+modify NetworkManager connection profiles. `mgmt_nic` is the management/public
+internet uplink, `site_nic` is the Site LAN NIC, and `site_cidr` is the LAN
+prefix advertised by that router.
 
 Firewalld and SELinux settings are not managed by default. Both options apply
 only to RedHat-family systems such as Rocky Linux and should be enabled in
@@ -360,6 +361,25 @@ The router maintains one TCP SYN rule for each input and output direction of
 reboot through `tailscale-mss-clamping.service`. Disable it with
 `tailscale_manage_mss_clamping: false` only in special environments where an
 external firewall manager owns the same rules.
+
+Site clients use the Router as their default gateway, but IP forwarding alone
+does not give private Site addresses a return path from the public internet.
+Public internet masquerading is therefore enabled by default:
+
+```yaml
+tailscale_site_public_internet_masquerade_enabled: true
+```
+
+The Router applies MASQUERADE only when traffic from its `site_cidr` leaves
+through `mgmt_nic`. Site-to-Site packets leave through `tailscale0`, so their
+source addresses remain governed separately by
+`tailscale_snat_subnet_routes`. The dedicated `ansible-site-nat` chain is
+restored after reboot by
+`tailscale-site-public-internet-masquerade.service` without modifying
+Tailscale's `ts-postrouting` chain. Set the option to `false` when an upstream
+gateway already owns Site NAT or return routing. Changing it from `true` to
+`false` stops and disables the service and removes its active chain; deployed
+files are retained.
 
 ## Site-to-Site Packet Flow
 
@@ -503,6 +523,57 @@ Enabling the server alone does not grant access; the operator must define both
 the required TCP port 22 network access and SSH authorization rules. Follow the
 [official Tailscale SSH documentation](https://tailscale.com/docs/features/tailscale-ssh)
 and manage those rules through the selected file or database policy workflow.
+
+An individual SSH rule uses the following huJSON form. `checkPeriod` applies
+only to `check`, and `acceptEnv` optionally allowlists environment variables
+that SSH clients may forward to the destination host.
+
+```hujson
+{
+  "action": "check", // "accept" or "check"
+  "src": [list-of-sources],
+  "dst": [list-of-destinations],
+  "users": [list-of-ssh-users],
+  "checkPeriod": "20h", // optional, only for check actions; default 12h
+  "acceptEnv": ["GIT_EDITOR", "GIT_COMMITTER_*", "CUSTOM_VAR_V?"] // optional
+},
+```
+
+The following policy uses this project's example tags. The `grants` rule
+supplies the required network access, while the `ssh` rule allows tagged
+routers in `region-a` and `region-b` to connect to each other as the existing
+local `root` account or any existing non-root account.
+
+```json
+{
+  "tagOwners": {
+    "tag:region-a": ["site2site@"],
+    "tag:region-b": ["site2site@"]
+  },
+  "grants": [
+    {
+      "src": ["*"],
+      "dst": ["*"],
+      "ip": ["*"]
+    }
+  ],
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["tag:region-a", "tag:region-b"],
+      "dst": ["tag:region-a", "tag:region-b"],
+      "users": ["root", "autogroup:nonroot"]
+    }
+  ]
+}
+```
+
+This is a broad example: it grants all network traffic and bidirectional SSH
+between both Router tag groups, including root login. Restrict the network
+grant, SSH sources, destinations, and local users for production. `accept`
+does not require periodic reauthentication. Refer to the
+[Headscale policy documentation](https://headscale.net/stable/ref/acls/) for
+implementation details and limitations.
 
 Use the full MagicDNS name for Tailscale SSH connections in this project:
 
@@ -802,6 +873,7 @@ ansible headscale -b -m command -a 'docker inspect headplane'
 ansible tailscale_routers -b -m command -a 'tailscale status'
 ansible tailscale_routers -b -m command -a 'sysctl net.ipv4.ip_forward'
 ansible tailscale_routers -b -m command -a 'systemctl is-active tailscale-mss-clamping'
+ansible tailscale_routers -b -m command -a 'systemctl is-active tailscale-site-public-internet-masquerade'
 ansible tailscale_routers -b -m command -a 'iptables -t mangle -S FORWARD'
 ```
 
@@ -939,6 +1011,8 @@ ip route show table 52
 sysctl net.ipv4.ip_forward
 iptables -t mangle -S FORWARD
 systemctl status tailscale-mss-clamping --no-pager
+systemctl status tailscale-site-public-internet-masquerade --no-pager
+iptables -t nat -vnL ansible-site-nat
 ```
 
 - `debug prefs`: is useful for checking the current local preferences, including the Headscale URL, advertised routes, route acceptance, and SNAT. Debug subcommands can change between Tailscale versions, so check `tailscale debug --help` first.

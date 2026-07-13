@@ -1,0 +1,14 @@
+[Unit]
+Description=Masquerade Site traffic to the public internet
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/tailscale-site-public-internet-masquerade apply
+ExecReload=/usr/local/sbin/tailscale-site-public-internet-masquerade apply
+ExecStop=/usr/local/sbin/tailscale-site-public-internet-masquerade remove
+
+[Install]
+WantedBy=multi-user.target

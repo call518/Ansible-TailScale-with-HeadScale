@@ -150,6 +150,7 @@ Inventory의 `[headscale_tagged_nodes]` 그룹에 속한 각 호스트는 비어
 | `tailscale_ssh_enabled` | `false` | 관리 대상 Router의 Tailscale SSH server 활성화 여부 |
 | `tailscale_manage_ipv6_forwarding` | `true` | IPv6 forwarding sysctl 관리 여부 |
 | `tailscale_manage_mss_clamping` | `true` | VPN 경로 TCP MSS clamping rule/service 관리 여부 |
+| `tailscale_site_public_internet_masquerade_enabled` | `true` | 각 Site CIDR을 inventory의 `mgmt_nic`으로 영구 masquerade할지 여부. 상위 NAT 또는 반환 route가 있으면 `false` |
 | `tailscale_interface` | `tailscale0` | Tailscale network interface 이름 |
 | `tailscale_site_test_enabled` | `true` | 임시 netns Site-to-Site 검증 실행 여부 |
 | `tailscale_site_test_cleanup_after_validation` | `false` | 검증 후 netns/veth 자동 삭제 여부 |
