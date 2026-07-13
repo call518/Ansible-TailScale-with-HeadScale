@@ -32,13 +32,40 @@
 - name: Validate router tag mapping
   ansible.builtin.assert:
     that:
-      - item in headscale_router_tags
+      - item in (groups['headscale_tagged_nodes'] | default([]))
+      - hostvars[item].headscale_node_tags is defined
     fail_msg: >-
-      No Headscale tag is mapped for router '{{ item }}' in
-      headscale_router_tags.
+      Router '{{ item }}' must be listed in the inventory
+      [headscale_tagged_nodes] group with headscale_node_tags.
   loop: "{{ groups['tailscale_routers'] }}"
   loop_control:
     label: "{{ item }}"
+  when: headscale_router_tags_enabled | bool
+
+- name: Validate router tag lists
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].headscale_node_tags is sequence
+      - hostvars[item].headscale_node_tags is not string
+      - hostvars[item].headscale_node_tags | length > 0
+      - >-
+        hostvars[item].headscale_node_tags |
+        select('match', '^tag:[a-zA-Z0-9-]+$') | list | length ==
+        hostvars[item].headscale_node_tags | length
+    fail_msg: >-
+      Router '{{ item }}' must define headscale_node_tags as a non-empty list.
+      Every value must use the 'tag:name' format.
+  loop: "{{ groups['tailscale_routers'] }}"
+  loop_control:
+    label: "{{ item }}"
+  when: headscale_router_tags_enabled | bool
+
+- name: Collect unique managed router tags
+  ansible.builtin.set_fact:
+    headscale_managed_router_tags: >-
+      {{ groups['tailscale_routers'] |
+         map('extract', hostvars, 'headscale_node_tags') |
+         flatten | unique | list }}
   when: headscale_router_tags_enabled | bool
 
 - name: Reconcile managed tag owners in database policy
@@ -72,7 +99,7 @@
                       [headscale_user_name ~ '@']) | unique | list
                  })
              }) }}
-      loop: "{{ headscale_router_tags.values() | unique | list }}"
+      loop: "{{ headscale_managed_router_tags }}"
       loop_control:
         label: "{{ item }}"
 
@@ -130,7 +157,7 @@
         path: /run/headscale/ansible-policy.json
         state: absent
 
-- name: Assign configured tag to each router
+- name: Assign configured tags to each router
   ansible.builtin.command:
     argv:
       - "{{ headscale_binary_path }}"
@@ -139,10 +166,10 @@
       - -i
       - "{{ headscale_router_node_ids[item] }}"
       - -t
-      - "{{ headscale_router_tags[item] }}"
+      - "{{ hostvars[item].headscale_node_tags | join(',') }}"
   loop: "{{ groups['tailscale_routers'] }}"
   loop_control:
-    label: "{{ item }} -> {{ headscale_router_tags[item] }}"
+    label: "{{ item }} -> {{ hostvars[item].headscale_node_tags | join(',') }}"
   changed_when: true
   when: headscale_router_tags_enabled | bool
 

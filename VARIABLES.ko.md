@@ -97,7 +97,6 @@
 | `headscale_policy_mode` | `database` | `file`은 템플릿, `database`는 DB를 운영 policy 원본으로 사용 |
 | `headscale_policy_path` | `/etc/headscale/policy.hujson` | 배포·seed·복구용 policy 파일 경로 |
 | `headscale_router_tags_enabled` | `true` | Router tagOwner 병합 및 노드 tag 할당 여부 |
-| `headscale_router_tags` | Router→tag map | Router별 논리 tag; policy와 node tag 명령의 단일 원본 |
 | `headscale_magic_dns` | `true` | MagicDNS 활성화 |
 | `headscale_dns_domain` | `tailnet.internal` | Tailnet MagicDNS base domain |
 | `headscale_override_local_dns` | `false` | Client local DNS를 Headscale 설정으로 대체할지 여부 |
@@ -110,6 +109,11 @@
 | `headscale_auto_update_enabled` | `false` | 배포 role의 자동 버전 갱신 허용 여부 |
 | `headscale_firewall_additional_ports` | `[]` | firewalld 관리 시 추가 개방할 `port/proto` 목록 |
 | `headscale_binary_checksum` | 빈 값 | 다운로드 바이너리 SHA-256 검증값; 운영 환경 설정 권장 |
+
+Inventory의 `[headscale_tagged_nodes]` 그룹에 속한 각 호스트는 비어 있지 않은
+`headscale_node_tags` 목록을 정의한다. 이 호스트별 tag는 노드 할당과 policy
+`tagOwners`의 원본이며, 하나 이상의 tag를 지정할 수 있다. 이 Role이 tag를 관리할
+호스트는 `[tailscale_routers]`에도 속해야 한다.
 
 ### 내부 CA
 

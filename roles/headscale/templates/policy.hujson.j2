@@ -1,8 +1,9 @@
 {
 {% if headscale_router_tags_enabled | bool %}
+{% set managed_tags = groups['tailscale_routers'] | map('extract', hostvars, 'headscale_node_tags') | flatten | unique | list %}
   "tagOwners": {
-{% for tag in headscale_router_tags.values() | unique %}
-    "{{ tag }}": ["{{ headscale_user_name }}@"]{% if not loop.last %},{% endif %}
+{% for tag in managed_tags %}
+    "{{ tag }}": ["{{ headscale_user_name }}@"]{{ ',' if not loop.last else '' }}{{ '\n' -}}
 {% endfor %}
   },
 {% endif %}

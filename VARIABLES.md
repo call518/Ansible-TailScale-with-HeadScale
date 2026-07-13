@@ -86,7 +86,6 @@ in the user-created, Ansible Vault-encrypted `vars-vault.yaml`.
 | `headscale_policy_mode` | `database` | Authoritative policy source: `file` template or database |
 | `headscale_policy_path` | `/etc/headscale/policy.hujson` | Deployed seed/recovery policy path |
 | `headscale_router_tags_enabled` | `true` | Enable router tagOwner reconciliation and node tag assignment |
-| `headscale_router_tags` | router-to-tag map | Single source for router logical tags and policy tagOwners |
 | `headscale_magic_dns`, `headscale_dns_domain` | `true`, `tailnet.internal` | MagicDNS switch/base domain |
 | `headscale_override_local_dns` | `false` | Replace client-local DNS settings |
 | `headscale_dns_global_nameservers` | `[]` | Global resolver list |
@@ -98,6 +97,11 @@ in the user-created, Ansible Vault-encrypted `vars-vault.yaml`.
 | `headscale_auto_update_enabled` | `false` | Permit automatic version updates by the role |
 | `headscale_firewall_additional_ports` | `[]` | Extra `port/proto` entries when firewalld is managed |
 | `headscale_binary_checksum` | empty | Expected binary SHA-256; recommended in production |
+
+Each host in the inventory `[headscale_tagged_nodes]` group defines
+`headscale_node_tags` as a non-empty list. These host-specific tags are the
+source for node assignment and policy `tagOwners`; multiple tags are supported.
+Tagged hosts managed by this Role must also belong to `[tailscale_routers]`.
 
 ### Internal CA and Headplane
 

@@ -475,21 +475,24 @@ Do not use `--limit` for the first complete deployment. Headscale
 configuration, router registration, and advertised route approval must run in
 that order.
 
-Test ACL/tag management is enabled by default. After registration, Ansible
-resolves the actual Headscale node IDs and assigns each router's logical region
-tag from `headscale_router_tags`. In the default topology, `tailscale-01/02`
-use `tag:region-a` and `tailscale-03/04` use `tag:region-b`.
+Router ACL/tag management is enabled by default. After registration, Ansible
+resolves the actual Headscale node IDs and assigns each router the tags in its
+inventory `headscale_node_tags` list. A router can have one or more tags. In
+the default topology, `tailscale-01/02` use `tag:region-a` and
+`tailscale-03/04` use `tag:region-b`.
 
-```yaml
-headscale_router_tags_enabled: true
-headscale_router_tags:
-  tailscale-01: tag:region-a
-  tailscale-02: tag:region-a
-  tailscale-03: tag:region-b
-  tailscale-04: tag:region-b
+```ini
+[headscale_tagged_nodes]
+tailscale-01 headscale_node_tags='["tag:region-a","tag:production"]'
+tailscale-02 headscale_node_tags='["tag:region-a"]'
+tailscale-03 headscale_node_tags='["tag:region-b"]'
+tailscale-04 headscale_node_tags='["tag:region-b"]'
 ```
 
-Set `headscale_router_tags_enabled: false` when this management is not needed.
+The separate group keeps router connection and Site routing fields concise in
+`[tailscale_routers]`; Ansible merges both group declarations into the same
+host variables. The global `headscale_router_tags_enabled` switch remains in
+`vars-common.yaml`. Set it to `false` when this management is not needed.
 
 Applying a tag changes the node owner from `site2site` to the special
 `tagged-devices` user, as required by the Headscale identity model. In database

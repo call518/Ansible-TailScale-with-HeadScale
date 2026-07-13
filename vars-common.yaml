@@ -113,11 +113,6 @@ headscale_log_format: text
 headscale_policy_mode: database
 headscale_policy_path: "{{ headscale_config_dir }}/policy.hujson"
 headscale_router_tags_enabled: true
-headscale_router_tags:
-  tailscale-01: tag:region-a
-  tailscale-02: tag:region-a
-  tailscale-03: tag:region-b
-  tailscale-04: tag:region-b
 headscale_magic_dns: true
 headscale_dns_domain: tailnet.internal
 headscale_override_local_dns: false
@@ -169,7 +164,7 @@ tailscale_interface: tailscale0
 
 # 선택적 Site-to-Site netns 검증
 tailscale_site_test_enabled: true
-tailscale_site_test_cleanup_after_validation: false
+tailscale_site_test_cleanup_after_validation: true
 tailscale_site_test_namespace: ns-test
 tailscale_site_test_veth_host: veth-host
 tailscale_site_test_veth_namespace: veth-ns
