@@ -453,6 +453,16 @@ tailscale-04 headscale_node_tags='["tag:region-b"]'
 전체 기능 스위치인 `headscale_router_tags_enabled`는 `vars-common.yaml`에 유지한다.
 이 작업이 필요 없으면 값을 `false`로 설정한다.
 
+관리 대상 Router의 Tailscale SSH는 선택 기능이며 기본적으로 비활성화된다.
+`vars-common.yaml`에서 `tailscale_ssh_enabled: true`로 설정하면 신규 Router와 이미
+등록된 Router 모두에 설정을 반영한다.
+
+이 프로젝트는 policy의 `ssh` 섹션을 생성·병합·삭제하지 않는다. SSH server를
+활성화하는 것만으로는 접속이 허용되지 않으며, 운영자가 TCP 22 network 접근 규칙과
+SSH 인가 규칙을 모두 작성해야 한다. [Tailscale SSH 공식
+문서](https://tailscale.com/docs/features/tailscale-ssh)를 참고하여 선택한 file 또는
+database policy 운영 방식으로 직접 관리한다.
+
 태그 적용 시 Headscale identity 모델에 따라 노드 소유자는 `site2site`에서
 `tagged-devices`로 전환된다. Database 모드에서 변수를 다시 `false`로 바꾸면 기존
 DB policy와 노드 tag는 삭제하지 않고 이후 ACL 병합과 tag 할당만 건너뛴다. File

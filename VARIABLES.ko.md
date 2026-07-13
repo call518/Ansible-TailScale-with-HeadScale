@@ -147,6 +147,7 @@ Inventory의 `[headscale_tagged_nodes]` 그룹에 속한 각 호스트는 비어
 | `tailscale_accept_routes` | `true` | 다른 Router의 subnet route 수락 여부 |
 | `tailscale_accept_dns` | `false` | Headscale DNS 설정 수락 여부 |
 | `tailscale_snat_subnet_routes` | `false` | Subnet route SNAT 여부. `false`이면 원본 Site IP가 보존되므로 Site-to-Site ACL은 Router tag가 아닌 실제 Site CIDR을 사용해야 함 |
+| `tailscale_ssh_enabled` | `false` | 관리 대상 Router의 Tailscale SSH server 활성화 여부 |
 | `tailscale_manage_ipv6_forwarding` | `true` | IPv6 forwarding sysctl 관리 여부 |
 | `tailscale_manage_mss_clamping` | `true` | VPN 경로 TCP MSS clamping rule/service 관리 여부 |
 | `tailscale_interface` | `tailscale0` | Tailscale network interface 이름 |

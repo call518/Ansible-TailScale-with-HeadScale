@@ -240,6 +240,7 @@
       - "--accept-routes={{ tailscale_accept_routes | bool | lower }}"
       - "--snat-subnet-routes={{ tailscale_snat_subnet_routes | bool | lower }}"
       - "--accept-dns={{ tailscale_accept_dns | bool | lower }}"
+      - "--ssh={{ tailscale_ssh_enabled | bool | lower }}"
   when: tailscale_registration_required | bool
   no_log: true
   changed_when: true
@@ -255,6 +256,7 @@
       - "--accept-routes={{ tailscale_accept_routes | bool | lower }}"
       - "--snat-subnet-routes={{ tailscale_snat_subnet_routes | bool | lower }}"
       - "--accept-dns={{ tailscale_accept_dns | bool | lower }}"
+      - "--ssh={{ tailscale_ssh_enabled | bool | lower }}"
   when: not (tailscale_registration_required | bool)
   register: tailscale_reconcile
   changed_when: "'Success' in tailscale_reconcile.stdout"

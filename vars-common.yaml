@@ -158,6 +158,7 @@ tailscale_udp_port: 41641
 tailscale_accept_routes: true
 tailscale_accept_dns: false
 tailscale_snat_subnet_routes: false
+tailscale_ssh_enabled: true
 tailscale_manage_ipv6_forwarding: true
 tailscale_manage_mss_clamping: true
 tailscale_interface: tailscale0

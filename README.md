@@ -494,6 +494,16 @@ The separate group keeps router connection and Site routing fields concise in
 host variables. The global `headscale_router_tags_enabled` switch remains in
 `vars-common.yaml`. Set it to `false` when this management is not needed.
 
+Tailscale SSH on managed routers is optional and disabled by default. Set
+`tailscale_ssh_enabled: true` in `vars-common.yaml` to enable it; the Role
+reconciles the setting on both new and already registered routers.
+
+This project does not create, merge, or remove the policy `ssh` section.
+Enabling the server alone does not grant access; the operator must define both
+the required TCP port 22 network access and SSH authorization rules. Follow the
+[official Tailscale SSH documentation](https://tailscale.com/docs/features/tailscale-ssh)
+and manage those rules through the selected file or database policy workflow.
+
 Applying a tag changes the node owner from `site2site` to the special
 `tagged-devices` user, as required by the Headscale identity model. In database
 mode, changing the variable back to `false` preserves the stored policy and

@@ -128,6 +128,7 @@ Tagged hosts managed by this Role must also belong to `[tailscale_routers]`.
 | `tailscale_accept_routes` | `true` | Accept remote subnet routes |
 | `tailscale_accept_dns` | `false` | Accept Headscale DNS settings |
 | `tailscale_snat_subnet_routes` | `false` | Subnet-route SNAT. When false, original Site IPs are preserved and Site-to-Site ACLs must use Site CIDRs rather than router tags |
+| `tailscale_ssh_enabled` | `false` | Enable the Tailscale SSH server on managed routers |
 | `tailscale_manage_ipv6_forwarding` | `true` | Manage IPv6 forwarding sysctl |
 | `tailscale_manage_mss_clamping` | `true` | Manage persistent TCP MSS-clamping rules |
 | `tailscale_interface` | `tailscale0` | Tailscale interface name |
