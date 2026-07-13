@@ -504,6 +504,18 @@ the required TCP port 22 network access and SSH authorization rules. Follow the
 [official Tailscale SSH documentation](https://tailscale.com/docs/features/tailscale-ssh)
 and manage those rules through the selected file or database policy workflow.
 
+Use the full MagicDNS name for Tailscale SSH connections in this project:
+
+```bash
+tailscale ssh root@tailscale-03.tailnet.internal
+```
+
+The common Role maps short inventory names such as `tailscale-03` to their
+management IPs in `/etc/hosts`. A short-name command could therefore resolve
+to `192.168.156.103` instead of the Tailnet address. The FQDN avoids that
+namespace collision without changing the management network mappings. Replace
+`tailnet.internal` when `headscale_dns_domain` uses a different value.
+
 Applying a tag changes the node owner from `site2site` to the special
 `tagged-devices` user, as required by the Headscale identity model. In database
 mode, changing the variable back to `false` preserves the stored policy and

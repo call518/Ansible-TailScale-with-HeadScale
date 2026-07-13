@@ -463,6 +463,18 @@ SSH 인가 규칙을 모두 작성해야 한다. [Tailscale SSH 공식
 문서](https://tailscale.com/docs/features/tailscale-ssh)를 참고하여 선택한 file 또는
 database policy 운영 방식으로 직접 관리한다.
 
+이 프로젝트에서 Tailscale SSH로 접속할 때는 전체 MagicDNS 이름을 사용한다.
+
+```bash
+tailscale ssh root@tailscale-03.tailnet.internal
+```
+
+Common Role이 `/etc/hosts`에서 `tailscale-03` 같은 짧은 inventory 이름을 관리
+IP에 연결하므로, 짧은 이름은 Tailnet 주소가 아니라 `192.168.156.103`으로
+해석될 수 있다. FQDN을 사용하면 관리망 이름 매핑을 변경하지 않고 이 namespace
+충돌을 피할 수 있다. `headscale_dns_domain`을 변경했다면 `tailnet.internal`
+부분도 해당 값으로 바꾼다.
+
 태그 적용 시 Headscale identity 모델에 따라 노드 소유자는 `site2site`에서
 `tagged-devices`로 전환된다. Database 모드에서 변수를 다시 `false`로 바꾸면 기존
 DB policy와 노드 tag는 삭제하지 않고 이후 ACL 병합과 tag 할당만 건너뛴다. File
