@@ -125,11 +125,17 @@ flowchart TB
 
 관리 대상 노드는 초기 NIC/IP 구성이 끝나 있고 SSH 접속이 가능해야 한다.
 
-## 아키텍처 다이어그램
+## 시스템 아키텍처
 
 <a href="https://deepwiki.com/call518/Ansible-TailScale-with-HeadScale" target="_blank" rel="noopener noreferrer">DeepWiki</a>
 
-![DeepWiki Architecture Diagram](images/DeepWiki-Architecture-Diagram.png)
+### 구성 요소 관계
+
+![DeepWiki High-Level Component Relationship](images/DeepWiki-Architecture-Diagram.png)
+
+### 코드-시스템 매핑
+
+![DeepWiki Code-to-System Mapping](images/DeepWiki-Code-to-System-Mapping.png)
 
 ## 파일 구조
 
