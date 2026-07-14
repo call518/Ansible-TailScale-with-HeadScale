@@ -132,6 +132,12 @@ The control node requires the following commands:
 Managed nodes must already have NIC and IP configuration and be reachable over
 SSH.
 
+## Architecture Diagram
+
+<a href="https://deepwiki.com/call518/Ansible-TailScale-with-HeadScale" target="_blank" rel="noopener noreferrer">DeepWiki</a>
+
+![DeepWiki Architecture Diagram](images/DeepWiki-Architecture-Diagram.png)
+
 ## Project Structure
 
 | File/Role | Responsibility |
