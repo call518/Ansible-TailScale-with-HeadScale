@@ -23,7 +23,6 @@ fact_cache/
 .vault-password
 vault_password_file
 .ansible_vault_pass*
-vars-vault.yaml
 
 # Private keys and local certificates
 *.key

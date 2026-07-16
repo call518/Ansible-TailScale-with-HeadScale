@@ -147,7 +147,7 @@ flowchart TB
 | `inventory.ini` | Headscale/Router 그룹, 관리 IP, SSH 계정, 관리/Site NIC, Site CIDR와 netns 시험 주소 |
 | `vars-common.yaml` | 버전, 경로, 포트와 공통 동작 변수 |
 | `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml` | OS별 package, service, CA trust와 Tailscale repository 변수 |
-| `vars-vault.yaml` | SSH Bootstrap 및 선택적 sudo 비밀번호 Vault 파일; 사용자가 생성하며 Git에서 제외 |
+| `vars-vault.yaml` | SSH Bootstrap 및 선택적 sudo 비밀번호용으로 제공되는 암호화된 샘플 Vault 파일 |
 | `VARIABLES.ko.md`, `VARIABLES.md` | 모든 vars 파일의 변수별 상세 참조 |
 | `roles/ssh_bootstrap` | Controller 입력 검증, Vault 비밀번호 기반 병렬 SSH 키 배포, 전체 결과 gate |
 | `roles/os_compat` | 지원 OS/아키텍처 검증 및 OS별 변수 로드 |
@@ -226,17 +226,27 @@ Map 키는 `inventory.ini`의 호스트명과 정확히 같아야 하며, `tails
 `vault_ssh_passwords[호스트명]`, `vault_ssh_common_password` 순이다. 둘 다 없으면 해당
 호스트명을 표시하고 SSH 연결 전에 실패한다. 대화식 비밀번호 입력은 지원하지 않는다.
 
-`vars-vault.yaml`은 저장소에 제공되지 않으며 `.gitignore` 대상이다. SSH Bootstrap을
-활성화하면 필수이고, 이미 키가 배포되어 `ssh_bootstrap_enabled: false`로 실행할 때는
-없어도 된다. Vault 마스터 비밀번호 파일은 기본적으로
-`~/.ansible_vault_pass_tailscale`이며 두 파일의 권한을 `0600`으로 제한한다.
+저장소에는 `ansible-pull`에서도 사용할 수 있도록 암호화된 샘플
+`vars-vault.yaml`이 포함되어 있으며 기본 Vault 비밀번호는 `changeme`이다. 이 비밀번호는
+공개된 샘플용이므로 실제 비밀값을 넣기 전에 반드시 자신의 비밀번호로 rekey하거나
+Vault 파일을 새로 생성해야 한다. SSH Bootstrap을 활성화하면 이 파일이 필수이고,
+이미 키가 배포되어 `ssh_bootstrap_enabled: false`로 실행할 때는 없어도 된다. Vault
+마스터 비밀번호 파일은 기본적으로 `~/.ansible_vault_pass_tailscale`이며 Git에 포함하지
+말고 Vault 파일과 함께 권한을 `0600`으로 제한한다.
+
+기존 샘플을 rekey하려면 먼저 새 비밀번호를 password 파일에 저장한 뒤 다음 명령을
+실행한다. 현재 Vault 비밀번호를 물으면 `changeme`를 입력한다.
 
 ```bash
-ansible-vault create \
-  --vault-password-file ~/.ansible_vault_pass_tailscale \
-  vars-vault.yaml
 chmod 600 vars-vault.yaml ~/.ansible_vault_pass_tailscale
+ansible-vault rekey \
+  --ask-vault-pass \
+  --new-vault-password-file ~/.ansible_vault_pass_tailscale \
+  vars-vault.yaml
 ```
+
+또는 샘플을 대체할 새 파일을 `ansible-vault create`로 생성한다. 어느 방법이든 실제 SSH
+또는 sudo 비밀번호는 rekey 또는 재생성을 마친 뒤에만 저장한다.
 
 수정할 때는 다음 명령을 사용한다.
 
@@ -272,13 +282,14 @@ Bootstrap 단계만 건너뛴다. 모든 노드의 Vault 검증, SSH 인증, 계
 SSH 키로 전체 배포를 실행한다. root 비밀번호 로그인이 금지된 환경에는 실제 SSH 계정과
 호스트별 Vault Map을 사용한다.
 
-`vars-vault.yaml`과 `~/.ansible_vault_pass_tailscale`은 모두 커밋하지 않는다.
+암호화된 샘플 `vars-vault.yaml`은 저장소에서 추적하지만, 실제 비밀값을 넣은 개인화된
+파일은 공개 저장소에 커밋하지 않는다. `~/.ansible_vault_pass_tailscale`은 항상 Git에서
+제외한다.
 `run.sh`는 Vault 파일이 없으면 Vault 옵션 없이 시작하지만, 활성화된 SSH Bootstrap
 Play가 필요한 비밀번호가 없음을 호스트별로 검증하고 중단한다. Vault 파일은 있는데
 마스터 비밀번호 파일을 읽을 수 없으면 `run.sh`가 즉시 중단한다. 평문 비밀번호가
 커밋됐다면 즉시 비밀번호를 교체하고 Git 이력에서도 제거해야 한다. 별도의
-`vars-vault.example.yaml`은 제공하지 않으며 필요한 변수 구조는 이 문서를 기준으로
-한다.
+`vars-vault.example.yaml` 대신 암호화된 `vars-vault.yaml` 자체를 샘플로 제공한다.
 
 실제 환경에 맞게 `inventory.ini`를 수정한다. 호스트명은 inventory의 호스트 이름으로,
 관리 IP는 `ansible_host`로 지정한다. `host_alias`, `mgmt_nic`, `site_nic`, `site_cidr`, 인증서
@@ -413,6 +424,23 @@ SSH 키를 지정하는 등 일반 `ansible-playbook` 옵션을 그대로 전달
 ./run.sh --limit tailscale-head
 ./run.sh --check --diff
 ```
+
+`ansible-pull`은 `run.sh`를 거치지 않으므로 Vault password 파일을 명시적으로 전달한다.
+`inventory.ini`와 개인 비밀번호로 rekey한 `vars-vault.yaml`이 pull하는 저장소/브랜치에
+준비되어 있어야 한다.
+
+```bash
+ansible-pull \
+  --url https://github.com/call518/Ansible-TailScale-with-HeadScale.git \
+  --inventory inventory.ini \
+  --vault-password-file ~/.ansible_vault_pass_tailscale \
+  local.yml
+```
+
+개인화한 Vault를 pull 작업 디렉터리에서만 수정하면 다음 checkout 때 저장소의 샘플로
+덮어쓸 수 있다. 지속적으로 `ansible-pull`을 사용할 때는 접근이 제한된 저장소나 브랜치에
+강한 비밀번호로 rekey한 Vault를 보관하고, Vault password 파일은 각 실행 노드에 Git
+외부 파일로 배포한다.
 
 `--check`는 template, package 등 일반 Ansible module의 예상 변경 확인에는 유용하지만,
 Pre-auth key 생성, `tailscale up` 및 route 승인 같은 command 기반 작업의 전체 실행

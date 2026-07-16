@@ -1,7 +1,7 @@
 # Variable Reference
 
 This document describes every project `vars-*.yaml` setting. Keep secrets only
-in the user-created, Ansible Vault-encrypted `vars-vault.yaml`.
+in the Ansible Vault-encrypted `vars-vault.yaml`.
 
 ## `vars-common.yaml`
 
@@ -161,7 +161,9 @@ advertisement; the effective value is forced to false unless that host's
 
 ## `vars-vault.yaml`
 
-This user-created file must not be committed.
+The repository includes an encrypted sample whose default Vault password is
+`changeme`. Rekey it with your own password or recreate it before adding real
+secrets.
 
 | Variable | Purpose |
 |---|---|

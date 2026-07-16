@@ -181,7 +181,8 @@ Inventory의 `[headscale_tagged_nodes]` 그룹에 속한 각 호스트는 비어
 
 ## `vars-vault.yaml`
 
-이 파일은 사용자가 생성하며 Git에 포함하지 않는다.
+저장소에는 기본 Vault 비밀번호가 `changeme`인 암호화된 샘플이 포함된다. 실제 비밀값을
+넣기 전에 자신의 비밀번호로 rekey하거나 파일을 새로 생성한다.
 
 | 변수 | 용도 |
 |---|---|

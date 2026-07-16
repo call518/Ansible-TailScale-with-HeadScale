@@ -154,7 +154,7 @@ SSH.
 | `inventory.ini` | Headscale/router groups, management IPs, SSH users, management/Site NICs, Site CIDRs, and netns test addresses |
 | `vars-common.yaml` | Shared versions, paths, ports, and behavior settings |
 | `vars-OS-RedHat.yaml`, `vars-OS-Debian.yaml` | OS-specific packages, services, CA trust, and Tailscale repositories |
-| `vars-vault.yaml` | User-created, Git-ignored Vault file for SSH Bootstrap and optional sudo passwords |
+| `vars-vault.yaml` | Encrypted sample Vault file for SSH Bootstrap and optional sudo passwords |
 | `VARIABLES.md`, `VARIABLES.ko.md` | Detailed reference for every vars-file setting |
 | `roles/ssh_bootstrap` | Controller validation, parallel Vault-password SSH key deployment, and aggregate result gate |
 | `roles/os_compat` | Supported OS/architecture validation and OS-specific variable loading |
@@ -242,18 +242,30 @@ its password in this order: `vault_ssh_passwords[hostname]`,
 fails before opening its SSH connection. Interactive password entry is not
 supported.
 
-`vars-vault.yaml` is not supplied by the repository and is ignored by Git. It
-is required while SSH Bootstrap is enabled, but it may be absent after keys are
-deployed and `ssh_bootstrap_enabled: false` is used. The default Vault master
-password file is `~/.ansible_vault_pass_tailscale`; restrict both files to mode
-`0600`.
+The repository includes an encrypted sample `vars-vault.yaml` so it is also
+available to `ansible-pull`. Its default Vault password is `changeme`. This is
+a public sample password: before storing any real secret, rekey the file with
+your own password or create a new Vault file. The file is required while SSH
+Bootstrap is enabled, but it may be absent after keys are deployed and
+`ssh_bootstrap_enabled: false` is used. The default Vault master-password file
+is `~/.ansible_vault_pass_tailscale`. Never commit that password file, and
+restrict both files to mode `0600`.
+
+To rekey the sample, first put the new password in the password file, then run
+the following command. Enter `changeme` when prompted for the current Vault
+password.
 
 ```bash
-ansible-vault create \
-  --vault-password-file ~/.ansible_vault_pass_tailscale \
-  vars-vault.yaml
 chmod 600 vars-vault.yaml ~/.ansible_vault_pass_tailscale
+ansible-vault rekey \
+  --ask-vault-pass \
+  --new-vault-password-file ~/.ansible_vault_pass_tailscale \
+  vars-vault.yaml
 ```
+
+Alternatively, replace the sample with a new file created by
+`ansible-vault create`. In either case, add real SSH or sudo passwords only
+after rekeying or recreating the Vault.
 
 Use the following command for later changes:
 
@@ -295,14 +307,15 @@ complete deployment with the existing SSH key and without Vault. When root
 password login is prohibited, use the actual SSH account and host-specific
 Vault map.
 
-Do not commit either `vars-vault.yaml` or `~/.ansible_vault_pass_tailscale`.
+The encrypted sample `vars-vault.yaml` is tracked in the repository, but do not
+commit a personalized copy containing real secrets to a public repository.
+Always keep `~/.ansible_vault_pass_tailscale` out of Git.
 `run.sh` starts without Vault options when the Vault vars file is absent, but
 an enabled SSH Bootstrap play validates the missing password per host and
 stops. If the Vault file exists but its master password file is unreadable,
-`run.sh` stops immediately. No
-`vars-vault.example.yaml` is provided; this document is the source of truth for
-the required variable structure. If a plaintext password was committed, rotate
-it immediately and remove it from Git history.
+`run.sh` stops immediately. The encrypted `vars-vault.yaml` itself serves as
+the sample instead of a separate `vars-vault.example.yaml`. If a plaintext
+password was committed, rotate it immediately and remove it from Git history.
 
 Edit `inventory.ini` for the target environment. Use the inventory host name as
 the host name and set its management IP with `ansible_host`. Host-specific
@@ -452,6 +465,23 @@ through unchanged.
 ./run.sh --limit tailscale-head
 ./run.sh --check --diff
 ```
+
+Because `ansible-pull` does not invoke `run.sh`, pass the Vault password file
+explicitly. The pulled repository or branch must contain the intended
+`inventory.ini` and a `vars-vault.yaml` rekeyed with your own password.
+
+```bash
+ansible-pull \
+  --url https://github.com/call518/Ansible-TailScale-with-HeadScale.git \
+  --inventory inventory.ini \
+  --vault-password-file ~/.ansible_vault_pass_tailscale \
+  local.yml
+```
+
+Changing the personalized Vault only in the pull working directory can be
+overwritten by a later checkout. For recurring `ansible-pull` runs, keep the
+strongly rekeyed Vault in an access-restricted repository or branch, while
+distributing the Vault password file to each execution node outside Git.
 
 `--check` is useful for previewing changes from standard Ansible modules such
 as template and package, but it cannot reproduce the complete behavior of
