@@ -1,0 +1,6 @@
+# local.yml
+---
+- name: Wrapper for ansible-pull
+  # ansible-pull이 다운로드한 폴더 내의 기존 플레이북을 그대로 로드합니다.
+  # 단, inventory.ini 파일도 같은 Git 저장소에 포함되어 있어야 합니다.
+  ansible.builtin.import_playbook: pb-tailscale-with-headscale.yaml
